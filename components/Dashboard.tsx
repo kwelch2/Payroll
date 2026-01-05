@@ -90,7 +90,11 @@ export default function Dashboard({ rates, setRates, employees, setEmployees, co
       setStatusMsg("Loading personnel_master_db.json...");
       const loadedEmps = await loadJsonFile('personnel_master_db.json', folderIds.configId);
       if (loadedEmps) {
-        setEmployees(loadedEmps);
+        // CHANGE THIS LINE:
+        // Old (Broken): setEmployees(loadedEmps); 
+        // New (Fixed):
+        setEmployees(loadedEmps.employees); 
+        
         logs.push("Loaded Personnel");
         loadedCount++;
       } else {
