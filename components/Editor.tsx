@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { PayrollRow, Employee, MasterRates } from '../types';
 import { calculatePayRow, getRowColor } from '../services/payrollService';
 import { saveJsonFile, ensureSystemFolders } from '../services/driveService';
-import { Edit2, Trash2, Printer, Save, RefreshCw, Plus, FileUp, AlertTriangle, CloudUpload } from 'lucide-react';
+import { Edit2, Trash2, Printer, Save, RefreshCw, Plus, FileUp, AlertTriangle, UploadCloud } from 'lucide-react';
 import RowModal from './RowModal';
 import PrintWizard from './PrintWizard';
 
@@ -163,7 +163,7 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
            </button>
            
            <button onClick={handleSaveToDrive} disabled={isSaving} className="btn-secondary flex items-center gap-2 bg-white border border-green-200 text-green-700 px-4 py-2 rounded-lg hover:bg-green-50 font-medium shadow-sm transition-all">
-             {isSaving ? <span className="animate-spin">⏳</span> : <CloudUpload size={18} />}
+             {isSaving ? <span className="animate-spin">⏳</span> : <UploadCloud size={18} />}
              Save Run
            </button>
 
