@@ -185,6 +185,7 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
     }
   };
 
+  // --- UPDATED CSV IMPORT ---
   const handleCSVImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -195,34 +196,53 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
       const newRows: PayrollRow[] = [];
       
       let headerIndex = -1;
-      for (let i = 0; i < Math.min(lines.length, 10); i++) {
-        if (lines[i].includes("Last Name") && lines[i].includes("First Name")) {
+      // Look for the header row containing specific columns
+      for (let i = 0; i < Math.min(lines.length, 20); i++) {
+        if (lines[i].includes("Last Name") && lines[i].includes("Start Date")) {
           headerIndex = i;
           break;
         }
       }
 
       if (headerIndex === -1) {
-        alert("Could not find header row. Check CSV.");
+        alert("Could not find valid header row. Ensure CSV has 'Last Name', 'Start Date', etc.");
         return;
       }
 
       for (let i = headerIndex + 1; i < lines.length; i++) {
         const line = lines[i].trim();
         if (!line) continue;
-        const cols = line.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g) || line.split(',');
+        
+        // Robust CSV Split (Handles quotes containing commas)
+        const cols = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
         const cleanCols = cols.map(c => c.replace(/^"|"$/g, '').trim());
         
+        // Skip empty or summary lines (need at least 11 columns based on your file)
         if (cleanCols.length < 10) continue;
 
+        // MAPPING BASED ON YOUR CSV STRUCTURE
+        // 0: Last Name, 1: First Name, 5: Start Date, 6: Start Time, 7: End Date, 8: End Time, 9: Pay Code, 10: Hours
         const lastName = cleanCols[0];
         const firstName = cleanCols[1];
+        
+        const startDate = cleanCols[5];  // "12/06/2025"
+        const startTime = cleanCols[6];  // "18:00"
+        const endDate = cleanCols[7];    // "12/07/2025"
+        const endTime = cleanCols[8];    // "06:00"
+        
         const payCode = cleanCols[9];
         const hours = parseFloat(cleanCols[10]);
 
-        if (payCode && !isNaN(hours) && hours > 0) {
+        if (payCode && !isNaN(hours)) {
            const fullName = `${lastName}, ${firstName}`;
            const row = calculatePayRow(fullName, payCode, hours, employees, rates);
+           
+           // Apply the parsed dates to the row object
+           row.startDate = startDate;
+           row.startTime = startTime;
+           row.endDate = endDate;
+           row.endTime = endTime;
+           
            newRows.push(row);
         }
       }
