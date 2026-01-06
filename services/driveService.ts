@@ -1,150 +1,169 @@
-/* global gapi, google */
+// services/driveService.ts
 
-declare global {
-  interface Window {
-    gapi: any;
-    google: any;
-  }
-}
+const API_KEY = import.meta.env.VITE_GOOGLE_API_KEY;
+const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 
-const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
-const SCOPES = 'https://www.googleapis.com/auth/drive.file';
-
-export interface DriveConfig {
-  clientId: string;
-  apiKey: string;
-}
+const DISCOVERY_DOCS = ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"];
+const SCOPES = "https://www.googleapis.com/auth/drive.file";
 
 let tokenClient: any;
-let gapiInited = false;
-let gisInited = false;
+// REMOVED: let gapiInited = false;
+// REMOVED: let gisInited = false;
 
-// --- INITIALIZATION ---
-
-export async function initGoogleApi(config: DriveConfig): Promise<void> {
-  return new Promise((resolve, reject) => {
+// Initialize GAPI (Client)
+export function initGapi() {
+  return new Promise<void>((resolve, reject) => {
     window.gapi.load('client', async () => {
       try {
         await window.gapi.client.init({
-          apiKey: config.apiKey,
-          discoveryDocs: [DISCOVERY_DOC],
+          apiKey: API_KEY,
+          discoveryDocs: DISCOVERY_DOCS,
         });
-        gapiInited = true;
-        if (gisInited) resolve();
-      } catch (e) {
-        reject(e);
+        resolve();
+      } catch (err) {
+        reject(err);
       }
     });
+  });
+}
 
+// Initialize GIS (Auth)
+export function initGis(onTokenCallback: (response: any) => void) {
+  return new Promise<void>((resolve) => {
     tokenClient = window.google.accounts.oauth2.initTokenClient({
-      client_id: config.clientId,
+      client_id: CLIENT_ID,
       scope: SCOPES,
-      callback: '', 
+      callback: (tokenResponse: any) => {
+        onTokenCallback(tokenResponse);
+      },
     });
-    gisInited = true;
-    if (gapiInited) resolve();
+    resolve();
   });
 }
 
-export async function signIn(): Promise<void> {
-  return new Promise((resolve, reject) => {
-    tokenClient.callback = async (resp: any) => {
-      if (resp.error !== undefined) {
-        reject(resp);
-      }
-      resolve();
-    };
-    tokenClient.requestAccessToken({ prompt: 'select_account' });
-  });
+export function requestAccessToken() {
+  if (!tokenClient) throw new Error("GIS not initialized");
+  tokenClient.requestAccessToken({ prompt: '' });
 }
 
-// --- FILE SYSTEM LOGIC ---
+// --- FOLDER LOGIC ---
 
-// Helper: Find a file or folder by name in a specific parent
-// MODIFIED: Made mimeType optional and permissive to fix "file not found" issues
-async function findItem(name: string, parentId: string = 'root', mimeType?: string) {
-  let query = `name = '${name}' and '${parentId}' in parents and trashed = false`;
-  if (mimeType) {
-    query += ` and mimeType = '${mimeType}'`;
+export async function ensureSystemFolders() {
+  const rootName = "Gem_Payroll_System";
+  
+  let rootId = await findFile(rootName, 'application/vnd.google-apps.folder');
+  if (!rootId) {
+    rootId = await createFolder(rootName);
+  }
+
+  let configId = await findFile("00_Config", 'application/vnd.google-apps.folder', rootId);
+  if (!configId) {
+    configId = await createFolder("00_Config", rootId);
+  }
+
+  const year = new Date().getFullYear();
+  const yearFolderName = `${year}_Payroll`;
+  let yearFolderId = await findFile(yearFolderName, 'application/vnd.google-apps.folder', rootId);
+  if (!yearFolderId) {
+    yearFolderId = await createFolder(yearFolderName, rootId);
+  }
+
+  return { rootId, configId, yearFolderId };
+}
+
+async function findFile(name: string, mimeType: string, parentId?: string): Promise<string | null> {
+  let query = `name = '${name}' and mimeType = '${mimeType}' and trashed = false`;
+  if (parentId) {
+    query += ` and '${parentId}' in parents`;
   }
   
   const response = await window.gapi.client.drive.files.list({
     q: query,
-    fields: 'files(id, name, mimeType)',
+    fields: 'files(id, name)',
   });
   
-  return response.result.files?.[0] || null;
+  const files = response.result.files;
+  if (files && files.length > 0) {
+    return files[0].id;
+  }
+  return null;
 }
 
-// Helper: Create a folder
-async function createFolder(name: string, parentId: string = 'root') {
-  const metadata = {
+async function createFolder(name: string, parentId?: string): Promise<string> {
+  const fileMetadata: any = {
     name: name,
     mimeType: 'application/vnd.google-apps.folder',
-    parents: [parentId],
   };
+  if (parentId) {
+    fileMetadata.parents = [parentId];
+  }
   
   const response = await window.gapi.client.drive.files.create({
-    resource: metadata,
+    resource: fileMetadata,
     fields: 'id',
   });
-  return response.result;
+  return response.result.id;
 }
 
-// Ensure the folder structure exists: Gem_Payroll_System > 00_Config
-export async function ensureSystemFolders() {
-  // 1. Root Folder
-  let root = await findItem('Gem_Payroll_System', 'root', 'application/vnd.google-apps.folder');
-  if (!root) root = await createFolder('Gem_Payroll_System');
+// --- FILE OPERATIONS ---
 
-  // 2. Config Folder
-  let config = await findItem('00_Config', root.id, 'application/vnd.google-apps.folder');
-  if (!config) config = await createFolder('00_Config', root.id);
+export async function saveJsonFile(filename: string, content: any, parentId: string) {
+  const fileContent = JSON.stringify(content, null, 2);
+  const file = new Blob([fileContent], { type: 'application/json' });
+  const metadata = {
+    name: filename,
+    mimeType: 'application/json',
+    parents: [parentId],
+  };
 
-  // 3. Current Year Folder (for output)
-  const currentYear = new Date().getFullYear().toString();
-  let yearFolder = await findItem(currentYear, root.id, 'application/vnd.google-apps.folder');
-  if (!yearFolder) yearFolder = await createFolder(currentYear, root.id);
+  const accessToken = window.gapi.client.getToken().access_token;
+  const form = new FormData();
+  form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+  form.append('file', file);
 
-  return { rootId: root.id, configId: config.id, yearFolderId: yearFolder.id };
+  await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+    method: 'POST',
+    headers: new Headers({ 'Authorization': 'Bearer ' + accessToken }),
+    body: form,
+  });
 }
 
-// Load specific JSON file content
-// MODIFIED: Removed strict 'application/json' check in findItem to handle text/plain uploads
-export async function loadJsonFile(filename: string, parentId: string) {
-  const file = await findItem(filename, parentId); // Look for ANY file with this name
-  if (!file) return null;
+export async function loadJsonFile(filenameOrId: string, parentId?: string) {
+  let fileId = filenameOrId;
+  
+  if (filenameOrId.endsWith('.json')) {
+    const foundId = await findFile(filenameOrId, 'application/json', parentId);
+    if (!foundId) return null;
+    fileId = foundId;
+  }
 
   const response = await window.gapi.client.drive.files.get({
-    fileId: file.id,
+    fileId: fileId,
     alt: 'media',
   });
   return response.result;
 }
 
-// Save specific JSON file (Create or Update)
-export async function saveJsonFile(filename: string, content: object, parentId: string) {
-  const existing = await findItem(filename, parentId);
-  
-  const fileContent = JSON.stringify(content, null, 2);
-  const blob = new Blob([fileContent], { type: 'application/json' });
-  const accessToken = window.gapi.client.getToken().access_token;
-  
-  const form = new FormData();
-  form.append('metadata', new Blob([JSON.stringify({
-    name: filename,
-    mimeType: 'application/json',
-    parents: existing ? [] : [parentId] // Only set parent on create
-  })], { type: 'application/json' }));
-  form.append('file', blob);
+// --- SAVED FILES LIST ---
+export interface DriveFile {
+  id: string;
+  name: string;
+  createdTime?: string;
+}
 
-  const method = existing ? 'PATCH' : 'POST';
-  const urlId = existing ? `/${existing.id}` : '';
-  const url = `https://www.googleapis.com/upload/drive/v3/files${urlId}?uploadType=multipart`;
-
-  await fetch(url, {
-    method: method,
-    headers: new Headers({ 'Authorization': 'Bearer ' + accessToken }),
-    body: form
-  });
+export async function listSavedFiles(folderId: string): Promise<DriveFile[]> {
+  const query = `'${folderId}' in parents and mimeType = 'application/json' and trashed = false`;
+  
+  try {
+    const response = await window.gapi.client.drive.files.list({
+      q: query,
+      fields: 'files(id, name, createdTime)',
+      orderBy: 'createdTime desc',
+      pageSize: 20
+    });
+    return response.result.files || [];
+  } catch (err) {
+    console.error("Error listing files:", err);
+    return [];
+  }
 }
