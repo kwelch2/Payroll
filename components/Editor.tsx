@@ -2,7 +2,11 @@ import React, { useState, useMemo } from 'react';
 import { PayrollRow, Employee, MasterRates } from '../types';
 import { calculatePayRow, getRowColor } from '../services/payrollService';
 import { saveJsonFile, ensureSystemFolders } from '../services/driveService';
-import { Edit2, Trash2, Printer, Save, RefreshCw, Plus, FileUp, AlertTriangle, UploadCloud } from 'lucide-react';
+import { 
+  Edit2, Printer, RefreshCw, FileUp, 
+  AlertTriangle, UploadCloud, ChevronRight, 
+  Filter, Clock, DollarSign, Calendar 
+} from 'lucide-react';
 import RowModal from './RowModal';
 import PrintWizard from './PrintWizard';
 
@@ -13,91 +17,109 @@ interface EditorProps {
   rates: MasterRates;
 }
 
+type ViewMode = 'summary' | 'detail';
+type FilterMode = 'all' | 'flagged' | 'standby';
+
 export default function Editor({ data, setData, employees, rates }: EditorProps) {
   const [editingRow, setEditingRow] = useState<PayrollRow | null>(null);
   const [showPrintWizard, setShowPrintWizard] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  
+  // New State for View/Filter
+  const [viewMode, setViewMode] = useState<ViewMode>('summary');
+  const [filterMode, setFilterMode] = useState<FilterMode>('all');
+  const [expandedEmp, setExpandedEmp] = useState<Set<string>>(new Set());
+  const [expandedCode, setExpandedCode] = useState<Set<string>>(new Set());
 
-  // Stats
+  // --- Helpers ---
+
+  const getEffectiveTotal = (row: PayrollRow) => {
+    // If we have a manual override, use it
+    if (row.manual_rate_override !== undefined && row.manual_rate_override !== null) {
+       const def = rates.pay_codes.definitions.find(d => d.label === row.code);
+       const isFlat = def?.type === 'flat';
+       return row.manual_rate_override * (isFlat ? 1 : row.hours);
+    }
+    return row.total || 0;
+  };
+
+  // --- Stats Calculation ---
   const stats = useMemo(() => {
     return data.reduce((acc, row) => {
-      const total = row.manual_rate_override !== undefined && row.manual_rate_override !== null
-        ? (row.manual_rate_override * (rates.pay_codes.definitions.find(d => d.label === row.code)?.type === 'flat' ? 1 : row.hours))
-        : (row.total || 0);
+      const total = getEffectiveTotal(row);
+      const isStandby = row.code.toLowerCase().includes('standby') || row.code.toLowerCase().includes('on call');
+      
       return {
         grandTotal: acc.grandTotal + total,
         totalHours: acc.totalHours + row.hours,
+        standbyHours: acc.standbyHours + (isStandby ? row.hours : 0),
         flagged: acc.flagged + (row.alert ? 1 : 0)
       };
-    }, { grandTotal: 0, totalHours: 0, flagged: 0 });
+    }, { grandTotal: 0, totalHours: 0, standbyHours: 0, flagged: 0 });
   }, [data, rates]);
 
-  // Updated Parser for the specific "Payroll Report" format
-  const handleCSVImport = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      const text = evt.target?.result as string;
-      const lines = text.split('\n');
-      const newRows: PayrollRow[] = [];
-      
-      // Find the header row index (starts with "Last Name")
-      let headerIndex = -1;
-      for (let i = 0; i < Math.min(lines.length, 10); i++) {
-        if (lines[i].includes("Last Name") && lines[i].includes("First Name")) {
-          headerIndex = i;
-          break;
-        }
-      }
+  // --- Filtering ---
+  const filteredData = useMemo(() => {
+    return data.filter(row => {
+      if (filterMode === 'flagged') return !!row.alert;
+      if (filterMode === 'standby') return row.code.toLowerCase().includes('standby') || row.code.toLowerCase().includes('on call');
+      return true; // Fixed typo here
+    });
+  }, [data, filterMode]);
 
-      if (headerIndex === -1) {
-        alert("Could not find header row ('Last Name', 'First Name'). Check CSV format.");
-        return;
-      }
+  // --- Grouping for Summary View ---
+  const groupedData = useMemo(() => {
+    const groups: Record<string, { 
+      name: string, 
+      payLevel: string, 
+      totalPay: number, 
+      totalHours: number, 
+      codes: Record<string, { totalPay: number, totalHours: number, rows: PayrollRow[] }> 
+    }> = {};
 
-      // Process data rows
-      for (let i = headerIndex + 1; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (!line) continue;
-
-        // Rudimentary CSV split handling quotes: "Value","Value 2"
-        // This regex splits by comma ONLY if it's not inside quotes
-        // If that fails, fallback to simple split if strict format
-        const cols = line.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g) || line.split(',');
-
-        // Clean quotes from results
-        const cleanCols = cols.map(c => c.replace(/^"|"$/g, '').trim());
-
-        // We need at least 11 columns for the specific format provided
-        // Index 0: Last Name
-        // Index 1: First Name
-        // Index 9: Pay Code
-        // Index 10: Time Calc
-        
-        if (cleanCols.length < 10) continue;
-
-        const lastName = cleanCols[0];
-        const firstName = cleanCols[1];
-        const payCode = cleanCols[9];
-        const hours = parseFloat(cleanCols[10]);
-
-        // Validate we have a Pay Code and Hours > 0
-        if (payCode && !isNaN(hours) && hours > 0) {
-           const fullName = `${lastName}, ${firstName}`;
-           newRows.push(calculatePayRow(fullName, payCode, hours, employees, rates));
-        }
+    filteredData.forEach(row => {
+      if (!groups[row.name]) {
+        groups[row.name] = { 
+          name: row.name, 
+          payLevel: row.payLevel, 
+          totalPay: 0, 
+          totalHours: 0, 
+          codes: {} 
+        };
       }
       
-      if (newRows.length > 0) {
-        setData(newRows);
-        alert(`Successfully imported ${newRows.length} rows.`);
-      } else {
-        alert("No valid data rows found. Check column order.");
+      const emp = groups[row.name];
+      const pay = getEffectiveTotal(row);
+
+      emp.totalPay += pay;
+      emp.totalHours += row.hours;
+
+      if (!emp.codes[row.code]) {
+        emp.codes[row.code] = { totalPay: 0, totalHours: 0, rows: [] };
       }
-    };
-    reader.readAsText(file);
-    e.target.value = ''; // Reset
+      
+      emp.codes[row.code].totalPay += pay;
+      emp.codes[row.code].totalHours += row.hours;
+      emp.codes[row.code].rows.push(row);
+    });
+
+    return Object.values(groups).sort((a, b) => a.name.localeCompare(b.name));
+  }, [filteredData, rates]);
+
+  // --- Handlers ---
+
+  const toggleEmp = (name: string) => {
+    const newSet = new Set(expandedEmp);
+    if (newSet.has(name)) newSet.delete(name);
+    else newSet.add(name);
+    setExpandedEmp(newSet);
+  };
+
+  const toggleCode = (id: string) => {
+    const newSet = new Set(expandedCode);
+    if (newSet.has(id)) newSet.delete(id);
+    else newSet.add(id);
+    setExpandedCode(newSet);
   };
 
   const handleUpdateRow = (updated: PayrollRow) => {
@@ -115,10 +137,14 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
   const handleRefreshDraft = () => {
     const refreshed = data.map(r => {
       const calc = calculatePayRow(r.name, r.code, r.hours, employees, rates);
-      // Preserve overrides
       calc.manual_rate_override = r.manual_rate_override;
       calc.manual_note = r.manual_note;
-      calc.id = r.id; // Keep ID
+      calc.id = r.id;
+      // Preserve dates if they exist
+      calc.startDate = r.startDate;
+      calc.startTime = r.startTime;
+      calc.endDate = r.endDate;
+      calc.endTime = r.endTime;
       return calc;
     });
     setData(refreshed);
@@ -127,14 +153,29 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
 
   const handleSaveToDrive = async () => {
     if (data.length === 0) return;
+
+    // 1. Generate a default name
+    const dateStr = new Date().toISOString().split('T')[0];
+    const defaultName = `Payroll_Run_${dateStr}`;
+
+    // 2. Ask user for filename
+    let filename = prompt("Enter a name for this payroll file:", defaultName);
+    if (filename === null) return; // User cancelled
+
+    filename = filename.trim();
+    if (filename === "") {
+      alert("Filename cannot be empty.");
+      return;
+    }
+    if (!filename.toLowerCase().endsWith('.json')) {
+      filename += '.json';
+    }
+
     try {
       setIsSaving(true);
-      const folders = await ensureSystemFolders(); // This ensures we get the current IDs
-      const dateStr = new Date().toISOString().split('T')[0];
-      const filename = `Payroll_Run_${dateStr}.json`;
-      
+      const folders = await ensureSystemFolders();
       await saveJsonFile(filename, { meta: { date: dateStr, stats }, rows: data }, folders.yearFolderId);
-      alert(`Saved to Drive: ${folders.yearFolderId}/${filename}`);
+      alert(`Successfully saved to Drive as: ${filename}`);
     } catch (err) {
       console.error(err);
       alert("Failed to save to Drive. Ensure you are connected in the Dashboard.");
@@ -143,111 +184,329 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
     }
   };
 
+  // Improved CSV Import to catch dates if available (Placeholder logic)
+  const handleCSVImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const text = evt.target?.result as string;
+      const lines = text.split('\n');
+      const newRows: PayrollRow[] = [];
+      
+      let headerIndex = -1;
+      for (let i = 0; i < Math.min(lines.length, 10); i++) {
+        if (lines[i].includes("Last Name") && lines[i].includes("First Name")) {
+          headerIndex = i;
+          break;
+        }
+      }
+
+      if (headerIndex === -1) {
+        alert("Could not find header row. Check CSV.");
+        return;
+      }
+
+      for (let i = headerIndex + 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+        const cols = line.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g) || line.split(',');
+        const cleanCols = cols.map(c => c.replace(/^"|"$/g, '').trim());
+        
+        if (cleanCols.length < 10) continue;
+
+        const lastName = cleanCols[0];
+        const firstName = cleanCols[1];
+        const payCode = cleanCols[9];
+        const hours = parseFloat(cleanCols[10]);
+
+        // Placeholder: Attempt to find dates if they exist in cols 
+        // Example: If Date is col 4, Start Time col 5, End Time col 6
+        // const date = cleanCols[4]; 
+        // const start = cleanCols[5];
+        // const end = cleanCols[6];
+
+        if (payCode && !isNaN(hours) && hours > 0) {
+           const fullName = `${lastName}, ${firstName}`;
+           const row = calculatePayRow(fullName, payCode, hours, employees, rates);
+           // row.startDate = date;
+           // row.startTime = start;
+           // row.endTime = end;
+           newRows.push(row);
+        }
+      }
+      
+      if (newRows.length > 0) {
+        setData(newRows);
+        alert(`Successfully imported ${newRows.length} rows.`);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
   return (
-    <div className="space-y-6">
-      {/* Actions Bar */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-        <div>
-           <h2 className="text-2xl font-bold text-gray-800">Current Payroll</h2>
-           <p className="text-sm text-gray-500">
-             {data.length} line items • Total: <span className="font-semibold text-green-700">${stats.grandTotal.toFixed(2)}</span>
-           </p>
+    <div className="space-y-6 pb-20">
+      
+      {/* --- TOP STATS BAR --- */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col">
+          <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2">
+            <DollarSign size={14} /> Gross Pay
+          </span>
+          <span className="text-2xl font-bold text-gray-900 mt-1">${stats.grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
         </div>
-        <div className="flex flex-wrap gap-2">
-           <label className="btn-secondary flex items-center gap-2 cursor-pointer bg-white border border-gray-300 px-4 py-2 rounded-lg hover:bg-gray-50 text-gray-700 font-medium shadow-sm transition-all">
-             <FileUp size={18} /> Import CSV
+        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col">
+          <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2">
+            <Clock size={14} /> Total Hours
+          </span>
+          <span className="text-2xl font-bold text-gray-900 mt-1">{stats.totalHours.toFixed(2)}</span>
+        </div>
+        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col">
+          <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2">
+            <Calendar size={14} /> Standby Hours
+          </span>
+          <span className="text-2xl font-bold text-blue-600 mt-1">{stats.standbyHours.toFixed(2)}</span>
+        </div>
+        <div className={`p-4 rounded-xl shadow-sm border flex flex-col ${stats.flagged > 0 ? 'bg-red-50 border-red-200' : 'bg-white border-gray-200'}`}>
+          <span className={`text-xs font-bold uppercase tracking-wider flex items-center gap-2 ${stats.flagged > 0 ? 'text-red-600' : 'text-gray-400'}`}>
+            <AlertTriangle size={14} /> Flags / Errors
+          </span>
+          <span className={`text-2xl font-bold mt-1 ${stats.flagged > 0 ? 'text-red-700' : 'text-gray-900'}`}>{stats.flagged}</span>
+        </div>
+      </div>
+
+      {/* --- CONTROLS --- */}
+      <div className="flex flex-col md:flex-row justify-between items-end md:items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-gray-200 sticky top-0 z-10">
+        
+        {/* View Toggles */}
+        <div className="flex bg-gray-100 p-1 rounded-lg">
+          <button 
+            onClick={() => setViewMode('summary')}
+            className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${viewMode === 'summary' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            Summary View
+          </button>
+          <button 
+            onClick={() => setViewMode('detail')}
+            className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${viewMode === 'detail' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            Detailed Log
+          </button>
+        </div>
+
+        {/* Filters & Actions */}
+        <div className="flex flex-wrap items-center gap-3">
+           <div className="relative">
+             <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+             <select 
+               className="pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none appearance-none cursor-pointer"
+               value={filterMode}
+               onChange={(e) => setFilterMode(e.target.value as FilterMode)}
+             >
+               <option value="all">Show All Items</option>
+               <option value="flagged">⚠️ Errors & Flags Only</option>
+               <option value="standby">🕰️ Standby/On-Call Only</option>
+             </select>
+           </div>
+
+           <div className="h-6 w-px bg-gray-300 mx-1"></div>
+
+           <label className="btn-icon" title="Import CSV">
+             <FileUp size={18} />
              <input type="file" accept=".csv" className="hidden" onChange={handleCSVImport} />
            </label>
-           <button onClick={handleRefreshDraft} className="btn-secondary flex items-center gap-2 bg-white border border-gray-300 px-4 py-2 rounded-lg hover:bg-gray-50 text-gray-700 font-medium shadow-sm transition-all">
-             <RefreshCw size={18} /> Refresh
+           
+           <button onClick={handleRefreshDraft} className="btn-icon" title="Refresh Rates">
+             <RefreshCw size={18} />
            </button>
            
-           <button onClick={handleSaveToDrive} disabled={isSaving} className="btn-secondary flex items-center gap-2 bg-white border border-green-200 text-green-700 px-4 py-2 rounded-lg hover:bg-green-50 font-medium shadow-sm transition-all">
-             {isSaving ? <span className="animate-spin">⏳</span> : <UploadCloud size={18} />}
-             Save Run
+           <button onClick={handleSaveToDrive} disabled={isSaving} className={`btn-icon ${isSaving ? 'opacity-50' : ''}`} title="Save to Drive">
+             {isSaving ? <span className="animate-spin text-xs">⏳</span> : <UploadCloud size={18} />}
            </button>
 
-           <button onClick={() => setShowPrintWizard(true)} className="btn-primary flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 font-medium shadow-sm transition-all">
-             <Printer size={18} /> Finalize & Print
+           <button onClick={() => setShowPrintWizard(true)} className="btn-primary flex items-center gap-2 bg-gray-900 text-white px-4 py-2 rounded-lg hover:bg-black font-medium shadow-md transition-all ml-2">
+             <Printer size={18} /> <span className="hidden sm:inline">Finalize</span>
            </button>
         </div>
       </div>
 
-      {/* Main Grid */}
-      <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-gray-50 text-gray-600 text-sm border-b border-gray-200">
-                <th className="p-4 font-semibold">Employee / Pay Level</th>
-                <th className="p-4 font-semibold">Pay Code</th>
-                <th className="p-4 font-semibold text-right">Hours/Qty</th>
-                <th className="p-4 font-semibold text-right">Rate</th>
-                <th className="p-4 font-semibold text-right">Total</th>
-                <th className="p-4 font-semibold text-center">Flags</th>
-                <th className="p-4 font-semibold text-center">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="p-8 text-center text-gray-400">No payroll data loaded. Import a CSV to start.</td>
-                </tr>
-              ) : (
-                data.map((row) => {
-                  const baseColor = getRowColor(row.code, rates);
-                  const rowBg = `${baseColor}33`; // 20% opacity (hex alpha)
-                  const borderColor = `${baseColor}88`; // darker border
+      {/* --- CONTENT AREA --- */}
+      <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden min-h-[500px]">
+        
+        {/* VIEW: SUMMARY */}
+        {viewMode === 'summary' && (
+          <div className="divide-y divide-gray-100">
+             {groupedData.map((emp) => {
+               const isEmpExpanded = expandedEmp.has(emp.name);
+               return (
+                 <div key={emp.name} className="bg-white">
+                   {/* Employee Header */}
+                   <div 
+                     className="flex items-center justify-between p-4 hover:bg-gray-50 cursor-pointer transition-colors"
+                     onClick={() => toggleEmp(emp.name)}
+                   >
+                     <div className="flex items-center gap-3">
+                       <div className={`p-1 rounded-full transition-transform ${isEmpExpanded ? 'rotate-90 bg-blue-100 text-blue-600' : 'text-gray-400'}`}>
+                         <ChevronRight size={18} />
+                       </div>
+                       <div>
+                         <h3 className="font-bold text-gray-800 text-lg">{emp.name}</h3>
+                         <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">{emp.payLevel}</span>
+                       </div>
+                     </div>
+                     <div className="text-right">
+                       <div className="font-bold text-gray-900">${emp.totalPay.toFixed(2)}</div>
+                       <div className="text-xs text-gray-500">{emp.totalHours.toFixed(2)} hrs</div>
+                     </div>
+                   </div>
 
-                  const effectiveTotal = row.manual_rate_override !== undefined && row.manual_rate_override !== null
-                     ? row.manual_rate_override * (rates.pay_codes.definitions.find(d => d.label === row.code)?.type === 'flat' ? 1 : row.hours)
-                     : (row.total || 0);
+                   {/* Employee Detail (Codes) */}
+                   {isEmpExpanded && (
+                     <div className="bg-gray-50 border-t border-gray-100">
+                       {Object.entries(emp.codes).map(([code, stats]) => {
+                         const codeId = `${emp.name}-${code}`;
+                         const isCodeExpanded = expandedCode.has(codeId);
+                         return (
+                           <div key={code} className="border-b border-gray-100 last:border-0">
+                             {/* Code Header */}
+                             <div 
+                               className="flex items-center justify-between py-3 px-4 pl-12 hover:bg-gray-100 cursor-pointer"
+                               onClick={() => toggleCode(codeId)}
+                             >
+                               <div className="flex items-center gap-2">
+                                  <div className={`transition-transform ${isCodeExpanded ? 'rotate-90 text-gray-600' : 'text-gray-300'}`}>
+                                    <ChevronRight size={14} />
+                                  </div>
+                                  <span className="font-medium text-gray-700">{code}</span>
+                                  <span className="text-xs text-gray-400">({stats.rows.length} entries)</span>
+                               </div>
+                               <div className="text-right flex gap-6 text-sm">
+                                  <span className="w-20 text-gray-600">{stats.totalHours.toFixed(2)} hrs</span>
+                                  <span className="w-24 font-mono font-medium text-gray-800">${stats.totalPay.toFixed(2)}</span>
+                               </div>
+                             </div>
 
-                  return (
-                    <tr 
-                      key={row.id} 
-                      style={{ backgroundColor: rowBg, borderLeft: `4px solid ${borderColor}` }}
-                      className="hover:brightness-95 transition-all cursor-pointer group"
-                      onClick={() => setEditingRow(row)}
-                    >
-                      <td className="p-3 border-b border-white/50">
-                        <div className="font-bold text-gray-800">{row.name}</div>
-                        <div className="text-xs text-gray-600 opacity-75">{row.payLevel}</div>
-                        {row.manual_note && <div className="text-xs text-blue-600 italic mt-1">📝 {row.manual_note}</div>}
-                      </td>
-                      <td className="p-3 border-b border-white/50">
-                        <span className="font-medium text-gray-800">{row.code}</span>
-                      </td>
-                      <td className="p-3 border-b border-white/50 text-right font-mono">{row.hours.toFixed(2)}</td>
-                      <td className="p-3 border-b border-white/50 text-right font-mono text-gray-600">
-                        {row.manual_rate_override ? (
-                          <span className="bg-yellow-100 text-yellow-800 px-1 rounded font-bold">${row.manual_rate_override.toFixed(2)}</span>
-                        ) : (
-                          row.rate !== null ? `$${row.rate.toFixed(2)}` : '—'
-                        )}
-                      </td>
-                      <td className="p-3 border-b border-white/50 text-right font-bold text-gray-800 font-mono">
-                        ${effectiveTotal.toFixed(2)}
-                      </td>
-                      <td className="p-3 border-b border-white/50 text-center">
-                         {row.alert && (
-                           <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-bold ${row.alertLevel === 'error' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
-                             <AlertTriangle size={12} /> {row.alert}
+                             {/* Drill Down (Actual Lines) */}
+                             {isCodeExpanded && (
+                               <div className="bg-white pl-16 pr-4 py-2 shadow-inner">
+                                 <table className="w-full text-xs text-left">
+                                   <thead>
+                                     <tr className="text-gray-400 border-b border-gray-100">
+                                       <th className="py-2 font-normal">Date</th>
+                                       <th className="py-2 font-normal">Time</th>
+                                       <th className="py-2 font-normal text-right">Hrs/Qty</th>
+                                       <th className="py-2 font-normal text-right">Rate</th>
+                                       <th className="py-2 font-normal text-right">Total</th>
+                                       <th className="py-2 font-normal text-right">Action</th>
+                                     </tr>
+                                   </thead>
+                                   <tbody>
+                                     {stats.rows.map(row => (
+                                       <tr key={row.id} className="border-b border-gray-50 last:border-0 hover:bg-blue-50/30">
+                                         <td className="py-2 text-gray-600">{row.startDate || '-'}</td>
+                                         <td className="py-2 text-gray-600">{row.startTime ? `${row.startTime} - ${row.endTime}` : '-'}</td>
+                                         <td className="py-2 text-right">{row.hours}</td>
+                                         <td className="py-2 text-right text-gray-500">{row.manual_rate_override ? `*${row.manual_rate_override}` : row.rate}</td>
+                                         <td className="py-2 text-right font-medium">${getEffectiveTotal(row).toFixed(2)}</td>
+                                         <td className="py-2 text-right">
+                                           <button onClick={() => setEditingRow(row)} className="text-blue-600 hover:underline">Edit</button>
+                                         </td>
+                                       </tr>
+                                     ))}
+                                   </tbody>
+                                 </table>
+                               </div>
+                             )}
                            </div>
-                         )}
-                      </td>
-                      <td className="p-3 border-b border-white/50 text-center">
-                         <button className="p-2 text-gray-500 hover:text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">
-                           <Edit2 size={16} />
-                         </button>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
+                         );
+                       })}
+                     </div>
+                   )}
+                 </div>
+               );
+             })}
+          </div>
+        )}
+
+        {/* VIEW: DETAIL (Flat Table) */}
+        {viewMode === 'detail' && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-gray-50 text-gray-600 text-xs uppercase tracking-wider border-b border-gray-200">
+                  <th className="p-4 font-semibold">Employee</th>
+                  <th className="p-4 font-semibold">Pay Code</th>
+                  <th className="p-4 font-semibold">Date / Time</th>
+                  <th className="p-4 font-semibold text-right">Hrs/Qty</th>
+                  <th className="p-4 font-semibold text-right">Rate</th>
+                  <th className="p-4 font-semibold text-right">Total</th>
+                  <th className="p-4 font-semibold text-center">Flags</th>
+                  <th className="p-4 font-semibold text-center">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredData.length === 0 ? (
+                  <tr><td colSpan={8} className="p-8 text-center text-gray-400">No data found matching your filters.</td></tr>
+                ) : (
+                  filteredData.map((row) => {
+                    const baseColor = getRowColor(row.code, rates);
+                    const rowBg = `${baseColor}20`; // Low opacity hex
+                    const effectiveTotal = getEffectiveTotal(row);
+
+                    return (
+                      <tr 
+                        key={row.id} 
+                        style={{ backgroundColor: rowBg }}
+                        className="hover:brightness-95 transition-all group border-b border-white"
+                      >
+                        <td className="p-3">
+                          <div className="font-bold text-gray-800 text-sm">{row.name}</div>
+                          <div className="text-xs text-gray-500">{row.payLevel}</div>
+                        </td>
+                        <td className="p-3">
+                          <span className="font-medium text-gray-700 text-sm">{row.code}</span>
+                          {row.manual_note && <div className="text-[10px] text-blue-600 mt-0.5">{row.manual_note}</div>}
+                        </td>
+                        <td className="p-3 text-xs text-gray-600">
+                          {row.startDate ? (
+                            <div>
+                              <div>{row.startDate}</div>
+                              <div className="opacity-75">{row.startTime} - {row.endTime}</div>
+                            </div>
+                          ) : <span className="text-gray-300">-</span>}
+                        </td>
+                        <td className="p-3 text-right font-mono text-sm">{row.hours.toFixed(2)}</td>
+                        <td className="p-3 text-right font-mono text-xs text-gray-500">
+                          {row.manual_rate_override ? (
+                            <span className="bg-yellow-100 text-yellow-800 px-1 rounded font-bold" title="Manual Override">${row.manual_rate_override.toFixed(2)}</span>
+                          ) : (
+                            row.rate !== null ? `$${row.rate.toFixed(2)}` : '-'
+                          )}
+                        </td>
+                        <td className="p-3 text-right font-bold text-gray-800 font-mono text-sm">
+                          ${effectiveTotal.toFixed(2)}
+                        </td>
+                        <td className="p-3 text-center">
+                           {row.alert && (
+                             <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-bold ${row.alertLevel === 'error' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+                               <AlertTriangle size={10} /> {row.alert}
+                             </div>
+                           )}
+                        </td>
+                        <td className="p-3 text-center">
+                           <button onClick={() => setEditingRow(row)} className="p-1.5 hover:bg-white rounded text-gray-500 hover:text-blue-600 transition-colors">
+                             <Edit2 size={16} />
+                           </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {editingRow && (
@@ -267,6 +526,13 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
           rates={rates}
         />
       )}
+
+      {/* Styles for new buttons */}
+      <style>{`
+        .btn-icon {
+          @apply p-2 rounded-lg bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 hover:text-blue-600 transition-all shadow-sm flex items-center justify-center;
+        }
+      `}</style>
     </div>
   );
 }
