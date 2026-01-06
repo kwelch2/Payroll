@@ -28,7 +28,11 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
   // New State for View/Filter
   const [viewMode, setViewMode] = useState<ViewMode>('summary');
   const [filterMode, setFilterMode] = useState<FilterMode>('all');
-  const [expandedEmp, setExpandedEmp] = useState<Set<string>>(new Set());
+  
+  // LOGIC CHANGE: We now track who is COLLAPSED (so default is everyone Open)
+  const [collapsedEmp, setCollapsedEmp] = useState<Set<string>>(new Set());
+  
+  // Drill-down details (Level 3) still default to Closed
   const [expandedCode, setExpandedCode] = useState<Set<string>>(new Set());
 
   // --- Helpers ---
@@ -63,7 +67,7 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
     return data.filter(row => {
       if (filterMode === 'flagged') return !!row.alert;
       if (filterMode === 'standby') return row.code.toLowerCase().includes('standby') || row.code.toLowerCase().includes('on call');
-      return true; // Fixed typo here
+      return true;
     });
   }, [data, filterMode]);
 
@@ -109,14 +113,16 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
   // --- Handlers ---
 
   const toggleEmp = (name: string) => {
-    const newSet = new Set(expandedEmp);
+    const newSet = new Set(collapsedEmp);
+    // If it's in the set, it is collapsed. Remove to open. Add to collapse.
     if (newSet.has(name)) newSet.delete(name);
     else newSet.add(name);
-    setExpandedEmp(newSet);
+    setCollapsedEmp(newSet);
   };
 
   const toggleCode = (id: string) => {
     const newSet = new Set(expandedCode);
+    // Standard expand logic
     if (newSet.has(id)) newSet.delete(id);
     else newSet.add(id);
     setExpandedCode(newSet);
@@ -140,7 +146,6 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
       calc.manual_rate_override = r.manual_rate_override;
       calc.manual_note = r.manual_note;
       calc.id = r.id;
-      // Preserve dates if they exist
       calc.startDate = r.startDate;
       calc.startTime = r.startTime;
       calc.endDate = r.endDate;
@@ -153,14 +158,11 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
 
   const handleSaveToDrive = async () => {
     if (data.length === 0) return;
-
-    // 1. Generate a default name
     const dateStr = new Date().toISOString().split('T')[0];
     const defaultName = `Payroll_Run_${dateStr}`;
 
-    // 2. Ask user for filename
     let filename = prompt("Enter a name for this payroll file:", defaultName);
-    if (filename === null) return; // User cancelled
+    if (filename === null) return; 
 
     filename = filename.trim();
     if (filename === "") {
@@ -184,7 +186,6 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
     }
   };
 
-  // Improved CSV Import to catch dates if available (Placeholder logic)
   const handleCSVImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -220,18 +221,9 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
         const payCode = cleanCols[9];
         const hours = parseFloat(cleanCols[10]);
 
-        // Placeholder: Attempt to find dates if they exist in cols 
-        // Example: If Date is col 4, Start Time col 5, End Time col 6
-        // const date = cleanCols[4]; 
-        // const start = cleanCols[5];
-        // const end = cleanCols[6];
-
         if (payCode && !isNaN(hours) && hours > 0) {
            const fullName = `${lastName}, ${firstName}`;
            const row = calculatePayRow(fullName, payCode, hours, employees, rates);
-           // row.startDate = date;
-           // row.startTime = start;
-           // row.endTime = end;
            newRows.push(row);
         }
       }
@@ -338,7 +330,9 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
         {viewMode === 'summary' && (
           <div className="divide-y divide-gray-100">
              {groupedData.map((emp) => {
-               const isEmpExpanded = expandedEmp.has(emp.name);
+               // LOGIC CHANGE: Check if collapsed (default open)
+               const isEmpOpen = !collapsedEmp.has(emp.name);
+               
                return (
                  <div key={emp.name} className="bg-white">
                    {/* Employee Header */}
@@ -347,7 +341,7 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
                      onClick={() => toggleEmp(emp.name)}
                    >
                      <div className="flex items-center gap-3">
-                       <div className={`p-1 rounded-full transition-transform ${isEmpExpanded ? 'rotate-90 bg-blue-100 text-blue-600' : 'text-gray-400'}`}>
+                       <div className={`p-1 rounded-full transition-transform ${isEmpOpen ? 'rotate-90 bg-blue-100 text-blue-600' : 'text-gray-400'}`}>
                          <ChevronRight size={18} />
                        </div>
                        <div>
@@ -362,28 +356,37 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
                    </div>
 
                    {/* Employee Detail (Codes) */}
-                   {isEmpExpanded && (
+                   {isEmpOpen && (
                      <div className="bg-gray-50 border-t border-gray-100">
                        {Object.entries(emp.codes).map(([code, stats]) => {
                          const codeId = `${emp.name}-${code}`;
                          const isCodeExpanded = expandedCode.has(codeId);
+                         
+                         // COLOR CODING
+                         const baseColor = getRowColor(code, rates);
+                         const headerBg = `${baseColor}25`; // 25 = ~15% opacity
+
                          return (
                            <div key={code} className="border-b border-gray-100 last:border-0">
                              {/* Code Header */}
                              <div 
-                               className="flex items-center justify-between py-3 px-4 pl-12 hover:bg-gray-100 cursor-pointer"
+                               className="flex items-center justify-between py-3 px-4 pl-12 cursor-pointer transition-colors border-l-4"
+                               style={{ 
+                                 backgroundColor: headerBg, 
+                                 borderLeftColor: baseColor 
+                               }}
                                onClick={() => toggleCode(codeId)}
                              >
                                <div className="flex items-center gap-2">
-                                  <div className={`transition-transform ${isCodeExpanded ? 'rotate-90 text-gray-600' : 'text-gray-300'}`}>
+                                  <div className={`transition-transform ${isCodeExpanded ? 'rotate-90 text-gray-700' : 'text-gray-500'}`}>
                                     <ChevronRight size={14} />
                                   </div>
-                                  <span className="font-medium text-gray-700">{code}</span>
-                                  <span className="text-xs text-gray-400">({stats.rows.length} entries)</span>
+                                  <span className="font-bold text-gray-800">{code}</span>
+                                  <span className="text-xs text-gray-600 opacity-70">({stats.rows.length} entries)</span>
                                </div>
                                <div className="text-right flex gap-6 text-sm">
-                                  <span className="w-20 text-gray-600">{stats.totalHours.toFixed(2)} hrs</span>
-                                  <span className="w-24 font-mono font-medium text-gray-800">${stats.totalPay.toFixed(2)}</span>
+                                  <span className="w-20 text-gray-800 font-medium">{stats.totalHours.toFixed(2)} hrs</span>
+                                  <span className="w-24 font-mono font-bold text-gray-900">${stats.totalPay.toFixed(2)}</span>
                                </div>
                              </div>
 
@@ -403,7 +406,7 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
                                    </thead>
                                    <tbody>
                                      {stats.rows.map(row => (
-                                       <tr key={row.id} className="border-b border-gray-50 last:border-0 hover:bg-blue-50/30">
+                                       <tr key={row.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50">
                                          <td className="py-2 text-gray-600">{row.startDate || '-'}</td>
                                          <td className="py-2 text-gray-600">{row.startTime ? `${row.startTime} - ${row.endTime}` : '-'}</td>
                                          <td className="py-2 text-right">{row.hours}</td>

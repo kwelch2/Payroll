@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { PayrollRow, MasterRates } from '../types';
-import { X, Trash2 } from 'lucide-react';
+import { X, Trash2, Calendar, Clock } from 'lucide-react';
 
 interface RowModalProps {
   row: PayrollRow;
@@ -31,12 +31,14 @@ export default function RowModal({ row, onClose, onSave, onDelete, rates }: RowM
         </div>
         
         <div className="p-6 space-y-5 bg-white overflow-y-auto">
+          {/* Employee Info */}
           <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
             <label className="label">Employee</label>
             <div className="font-bold text-lg text-gray-800">{row.name}</div>
             <div className="text-xs text-gray-500 mt-1">{row.payLevel}</div>
           </div>
           
+          {/* Pay Code Selector */}
           <div>
             <label className="label">Pay Code</label>
             <div className="relative">
@@ -55,6 +57,45 @@ export default function RowModal({ row, onClose, onSave, onDelete, rates }: RowM
             </div>
           </div>
 
+          {/* DATE & TIME SECTION (New) */}
+          <div className="bg-blue-50/50 p-3 rounded-xl border border-blue-100 space-y-3">
+            <h4 className="text-[10px] font-bold text-blue-400 uppercase tracking-wider flex items-center gap-1">
+              <Calendar size={12} /> Shift Details
+            </h4>
+            
+            <div>
+              <label className="label">Date</label>
+              <input 
+                type="date"
+                className="input-field bg-white"
+                value={form.startDate || ''}
+                onChange={(e) => setForm({ ...form, startDate: e.target.value })}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+               <div>
+                 <label className="label flex items-center gap-1"><Clock size={12}/> Start</label>
+                 <input 
+                   type="time"
+                   className="input-field bg-white"
+                   value={form.startTime || ''}
+                   onChange={(e) => setForm({ ...form, startTime: e.target.value })}
+                 />
+               </div>
+               <div>
+                 <label className="label flex items-center gap-1"><Clock size={12}/> End</label>
+                 <input 
+                   type="time"
+                   className="input-field bg-white"
+                   value={form.endTime || ''}
+                   onChange={(e) => setForm({ ...form, endTime: e.target.value })}
+                 />
+               </div>
+            </div>
+          </div>
+
+          {/* Hours & Rates */}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="label">Hours / Qty</label>
@@ -83,10 +124,11 @@ export default function RowModal({ row, onClose, onSave, onDelete, rates }: RowM
             </div>
           </div>
 
+          {/* Notes */}
           <div>
             <label className="label">Note / Audit Reason</label>
             <textarea 
-              className="input-field min-h-[80px] resize-none" 
+              className="input-field min-h-[60px] resize-none" 
               placeholder="Why was this changed?"
               value={form.manual_note || ''}
               onChange={(e) => setForm({ ...form, manual_note: e.target.value })}
@@ -94,6 +136,7 @@ export default function RowModal({ row, onClose, onSave, onDelete, rates }: RowM
           </div>
         </div>
 
+        {/* Footer */}
         <div className="p-4 bg-gray-50 flex justify-between items-center border-t border-gray-100 shrink-0">
            <button onClick={() => onDelete(row.id)} className="text-red-600 hover:bg-red-50 hover:text-red-700 px-4 py-2 rounded-lg flex items-center gap-2 font-medium transition-colors text-sm">
              <Trash2 size={16} /> Delete Line
