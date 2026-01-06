@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  ShieldCheck, AlertCircle, Database, LayoutTemplate, 
-  FolderOpen, FileText, Loader, Save, RotateCcw 
+  ShieldCheck, Database, FolderOpen, FileText, Loader, RotateCcw 
 } from 'lucide-react';
 import { 
   initGapi, initGis, requestAccessToken, 
@@ -40,9 +39,6 @@ export default function Dashboard() {
             setStatusMsg("Connected to Drive.");
           }
         });
-        
-        // Auto-trigger auth popup if not logged in (Optional: might be blocked by popup blocker, better to use button)
-        // For better UX, we usually wait for user click, but if token exists it auto-validates.
       } catch (err) {
         console.error(err);
         setStatusMsg("Error connecting to Google Drive.");
