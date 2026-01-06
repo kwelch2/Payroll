@@ -29,10 +29,10 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
   const [viewMode, setViewMode] = useState<ViewMode>('summary');
   const [filterMode, setFilterMode] = useState<FilterMode>('all');
   
-  // LOGIC CHANGE: We now track who is COLLAPSED (so default is everyone Open)
+  // LOGIC: Default to Open (track collapsed state)
   const [collapsedEmp, setCollapsedEmp] = useState<Set<string>>(new Set());
   
-  // Drill-down details (Level 3) still default to Closed
+  // Drill-down details (Level 3) default to Closed
   const [expandedCode, setExpandedCode] = useState<Set<string>>(new Set());
 
   // --- Helpers ---
@@ -114,7 +114,6 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
 
   const toggleEmp = (name: string) => {
     const newSet = new Set(collapsedEmp);
-    // If it's in the set, it is collapsed. Remove to open. Add to collapse.
     if (newSet.has(name)) newSet.delete(name);
     else newSet.add(name);
     setCollapsedEmp(newSet);
@@ -122,7 +121,6 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
 
   const toggleCode = (id: string) => {
     const newSet = new Set(expandedCode);
-    // Standard expand logic
     if (newSet.has(id)) newSet.delete(id);
     else newSet.add(id);
     setExpandedCode(newSet);
@@ -143,6 +141,7 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
   const handleRefreshDraft = () => {
     const refreshed = data.map(r => {
       const calc = calculatePayRow(r.name, r.code, r.hours, employees, rates);
+      // Preserve manual edits and Dates
       calc.manual_rate_override = r.manual_rate_override;
       calc.manual_note = r.manual_note;
       calc.id = r.id;
@@ -330,7 +329,6 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
         {viewMode === 'summary' && (
           <div className="divide-y divide-gray-100">
              {groupedData.map((emp) => {
-               // LOGIC CHANGE: Check if collapsed (default open)
                const isEmpOpen = !collapsedEmp.has(emp.name);
                
                return (
@@ -362,19 +360,18 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
                          const codeId = `${emp.name}-${code}`;
                          const isCodeExpanded = expandedCode.has(codeId);
                          
-                         // COLOR CODING
-                         const baseColor = getRowColor(code, rates);
-                         const headerBg = `${baseColor}25`; // 25 = ~15% opacity
+                         // Determine Definition and Colors
+                         const def = rates.pay_codes.definitions.find(d => d.label === code);
+                         const baseColor = def ? def.color : '#e2e8f0';
+                         const headerBg = `${baseColor}25`; // ~15% opacity
+                         const isFlatRate = def?.type === 'flat';
 
                          return (
                            <div key={code} className="border-b border-gray-100 last:border-0">
-                             {/* Code Header */}
+                             {/* Code Header (Clickable) */}
                              <div 
                                className="flex items-center justify-between py-3 px-4 pl-12 cursor-pointer transition-colors border-l-4"
-                               style={{ 
-                                 backgroundColor: headerBg, 
-                                 borderLeftColor: baseColor 
-                               }}
+                               style={{ backgroundColor: headerBg, borderLeftColor: baseColor }}
                                onClick={() => toggleCode(codeId)}
                              >
                                <div className="flex items-center gap-2">
@@ -382,10 +379,21 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
                                     <ChevronRight size={14} />
                                   </div>
                                   <span className="font-bold text-gray-800">{code}</span>
-                                  <span className="text-xs text-gray-600 opacity-70">({stats.rows.length} entries)</span>
+                                  {/* SWAP LOGIC PART A: Left Side Info */}
+                                  <span className="text-xs text-gray-600 opacity-70 ml-2">
+                                    {isFlatRate 
+                                      ? `(${stats.totalHours.toFixed(2)} hrs total)` 
+                                      : `(${stats.rows.length} entries)`}
+                                  </span>
                                </div>
+
                                <div className="text-right flex gap-6 text-sm">
-                                  <span className="w-20 text-gray-800 font-medium">{stats.totalHours.toFixed(2)} hrs</span>
+                                  {/* SWAP LOGIC PART B: Right Side Info */}
+                                  <span className="w-24 text-gray-800 font-medium text-right">
+                                    {isFlatRate 
+                                      ? `${stats.rows.length} Qty` 
+                                      : `${stats.totalHours.toFixed(2)} hrs`}
+                                  </span>
                                   <span className="w-24 font-mono font-bold text-gray-900">${stats.totalPay.toFixed(2)}</span>
                                </div>
                              </div>
@@ -396,8 +404,8 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
                                  <table className="w-full text-xs text-left">
                                    <thead>
                                      <tr className="text-gray-400 border-b border-gray-100">
-                                       <th className="py-2 font-normal">Date</th>
-                                       <th className="py-2 font-normal">Time</th>
+                                       <th className="py-2 font-normal w-24">Date</th>
+                                       <th className="py-2 font-normal w-32">Time</th>
                                        <th className="py-2 font-normal text-right">Hrs/Qty</th>
                                        <th className="py-2 font-normal text-right">Rate</th>
                                        <th className="py-2 font-normal text-right">Total</th>
@@ -407,8 +415,11 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
                                    <tbody>
                                      {stats.rows.map(row => (
                                        <tr key={row.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50">
+                                         {/* FIXED: Explicit Date and Time Columns */}
                                          <td className="py-2 text-gray-600">{row.startDate || '-'}</td>
-                                         <td className="py-2 text-gray-600">{row.startTime ? `${row.startTime} - ${row.endTime}` : '-'}</td>
+                                         <td className="py-2 text-gray-600 text-[10px]">
+                                            {row.startTime ? `${row.startTime} - ${row.endTime}` : '-'}
+                                         </td>
                                          <td className="py-2 text-right">{row.hours}</td>
                                          <td className="py-2 text-right text-gray-500">{row.manual_rate_override ? `*${row.manual_rate_override}` : row.rate}</td>
                                          <td className="py-2 text-right font-medium">${getEffectiveTotal(row).toFixed(2)}</td>
@@ -440,7 +451,8 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
                 <tr className="bg-gray-50 text-gray-600 text-xs uppercase tracking-wider border-b border-gray-200">
                   <th className="p-4 font-semibold">Employee</th>
                   <th className="p-4 font-semibold">Pay Code</th>
-                  <th className="p-4 font-semibold">Date / Time</th>
+                  <th className="p-4 font-semibold">Date</th>
+                  <th className="p-4 font-semibold">Time</th>
                   <th className="p-4 font-semibold text-right">Hrs/Qty</th>
                   <th className="p-4 font-semibold text-right">Rate</th>
                   <th className="p-4 font-semibold text-right">Total</th>
@@ -450,7 +462,7 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
               </thead>
               <tbody>
                 {filteredData.length === 0 ? (
-                  <tr><td colSpan={8} className="p-8 text-center text-gray-400">No data found matching your filters.</td></tr>
+                  <tr><td colSpan={9} className="p-8 text-center text-gray-400">No data found matching your filters.</td></tr>
                 ) : (
                   filteredData.map((row) => {
                     const baseColor = getRowColor(row.code, rates);
@@ -471,13 +483,13 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
                           <span className="font-medium text-gray-700 text-sm">{row.code}</span>
                           {row.manual_note && <div className="text-[10px] text-blue-600 mt-0.5">{row.manual_note}</div>}
                         </td>
-                        <td className="p-3 text-xs text-gray-600">
-                          {row.startDate ? (
-                            <div>
-                              <div>{row.startDate}</div>
-                              <div className="opacity-75">{row.startTime} - {row.endTime}</div>
-                            </div>
-                          ) : <span className="text-gray-300">-</span>}
+                        {/* FIXED: Date Column */}
+                        <td className="p-3 text-sm text-gray-700">
+                          {row.startDate || <span className="text-gray-300">-</span>}
+                        </td>
+                        {/* FIXED: Time Column */}
+                        <td className="p-3 text-xs text-gray-600 font-mono">
+                          {row.startTime ? `${row.startTime} - ${row.endTime}` : <span className="text-gray-300">-</span>}
                         </td>
                         <td className="p-3 text-right font-mono text-sm">{row.hours.toFixed(2)}</td>
                         <td className="p-3 text-right font-mono text-xs text-gray-500">
