@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
-import { MasterRates, Employee, AppConfig, PayCode } from '../types';
-import RateMatrix from './RateMatrix';
+import { useState } from 'react';
+import { MasterRates, Employee, AppConfig } from '../types';
 import StaffDirectory from './StaffDirectory';
-import ConfigPanel from './ConfigPanel';
+import RateMatrix from './RateMatrix';
+import PayCodeEditor from './PayCodeEditor';
+import SystemDefs from './SystemDefs'; // Import the new component
 
 interface SettingsProps {
   rates: MasterRates;
@@ -14,38 +15,70 @@ interface SettingsProps {
 }
 
 export default function Settings({ rates, setRates, employees, setEmployees, config, setConfig }: SettingsProps) {
-  const [tab, setTab] = useState<'rates' | 'staff' | 'config'>('rates');
+  const [activeTab, setActiveTab] = useState<'personnel' | 'rates' | 'codes' | 'system'>('personnel');
 
   return (
-    <div className="flex flex-col md:flex-row gap-6 h-[calc(100vh-140px)]">
-      {/* Sidebar */}
-      <div className="w-full md:w-64 flex flex-col gap-2 bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-         <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 px-2">System</h3>
-         <button 
-           onClick={() => setTab('rates')}
-           className={`text-left px-4 py-3 rounded-lg font-medium transition-colors ${tab === 'rates' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
-         >
-           💰 Master Rates
-         </button>
-         <button 
-           onClick={() => setTab('staff')}
-           className={`text-left px-4 py-3 rounded-lg font-medium transition-colors ${tab === 'staff' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
-         >
-           👨‍🚒 Staff Directory
-         </button>
-         <button 
-           onClick={() => setTab('config')}
-           className={`text-left px-4 py-3 rounded-lg font-medium transition-colors ${tab === 'config' ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
-         >
-           ⚙️ Configuration
-         </button>
+    <div className="flex flex-col h-full gap-4">
+      
+      {/* Settings Navigation */}
+      <div className="flex gap-2 border-b border-gray-200 pb-2 overflow-x-auto">
+        <button 
+          onClick={() => setActiveTab('personnel')}
+          className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors whitespace-nowrap ${activeTab === 'personnel' ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:bg-gray-100'}`}
+        >
+          Personnel
+        </button>
+        <button 
+          onClick={() => setActiveTab('rates')}
+          className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors whitespace-nowrap ${activeTab === 'rates' ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:bg-gray-100'}`}
+        >
+          Pay Rates
+        </button>
+        <button 
+          onClick={() => setActiveTab('codes')}
+          className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors whitespace-nowrap ${activeTab === 'codes' ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:bg-gray-100'}`}
+        >
+          Pay Codes
+        </button>
+        <button 
+          onClick={() => setActiveTab('system')}
+          className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors whitespace-nowrap ${activeTab === 'system' ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:bg-gray-100'}`}
+        >
+          System Config
+        </button>
       </div>
 
       {/* Content Area */}
-      <div className="flex-1 bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden flex flex-col">
-        {tab === 'rates' && <RateMatrix rates={rates} setRates={setRates} />}
-        {tab === 'staff' && <StaffDirectory employees={employees} setEmployees={setEmployees} config={config} rates={rates} />}
-        {tab === 'config' && <ConfigPanel config={config} setConfig={setConfig} rates={rates} setRates={setRates} />}
+      <div className="flex-1 bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+        
+        {activeTab === 'personnel' && (
+          <StaffDirectory 
+             employees={employees} 
+             setEmployees={setEmployees} 
+          />
+        )}
+
+        {activeTab === 'codes' && (
+          <PayCodeEditor 
+             rates={rates} 
+             setRates={setRates} 
+          />
+        )}
+
+        {activeTab === 'rates' && (
+          <RateMatrix 
+             rates={rates} 
+             setRates={setRates} 
+          />
+        )}
+
+        {activeTab === 'system' && (
+          <SystemDefs 
+             config={config}
+             setConfig={setConfig}
+          />
+        )}
+
       </div>
     </div>
   );

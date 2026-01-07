@@ -94,6 +94,7 @@ export default function PayrollPage({ data, setData, employees, rates, systemIds
           setData={setData} 
           employees={employees} 
           rates={rates} 
+          systemIds={systemIds} 
         />
       )}
 
