@@ -1,6 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { PayrollRow, MasterRates } from '../types';
-import { X, Printer, CheckSquare, Square } from 'lucide-react';
+import { 
+  X, Printer, CheckSquare, Square, Filter, 
+  ArrowUpDown, Calendar, Search, ChevronDown, ChevronRight 
+} from 'lucide-react';
 
 interface PrintWizardProps {
   data: PayrollRow[];
@@ -8,233 +11,438 @@ interface PrintWizardProps {
   rates: MasterRates;
 }
 
-type ViewMode = 'summary' | 'detail' | 'hourly_only' | 'custom';
+type ViewMode = 'summary' | 'detail' | 'custom';
+type SortField = 'name' | 'payLevel' | 'date';
 
 export default function PrintWizard({ data, onClose, rates }: PrintWizardProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('summary');
-  const [customSelection, setCustomSelection] = useState<Set<string>>(new Set(data.map(d => d.id)));
+  
+  // --- FILTERS & SORTING STATE ---
+  const [search, setSearch] = useState("");
+  const [sortField, setSortField] = useState<SortField>('payLevel');
+  const [sortAsc, setSortAsc] = useState(true);
+  const [filterLevel, setFilterLevel] = useState<string>("all");
+  const [filterCode, setFilterCode] = useState<string>("all");
+  
+  // Custom Selection Set
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set(data.map(d => d.id)));
 
-  const handlePrint = () => {
-    window.print();
-  };
+  const handlePrint = () => window.print();
 
-  const toggleSelection = (id: string) => {
-    const newSet = new Set(customSelection);
-    if (newSet.has(id)) newSet.delete(id);
-    else newSet.add(id);
-    setCustomSelection(newSet);
-  };
+  // --- DATA PROCESSING ENGINE ---
+  const processedData = useMemo(() => {
+    let result = [...data];
 
-  const filteredData = data.filter(r => {
-    if (viewMode === 'hourly_only') {
-      // Logic for Hourly/User-Pay group
-      return r.payLevel.toLowerCase() === 'hourly only' || r.payLevel.toLowerCase() === 'user-pay-level';
+    // 1. Filter
+    if (search) {
+      const lower = search.toLowerCase();
+      result = result.filter(r => r.name.toLowerCase().includes(lower));
     }
+    if (filterLevel !== 'all') {
+      result = result.filter(r => r.payLevel === filterLevel);
+    }
+    if (filterCode !== 'all') {
+      result = result.filter(r => r.code === filterCode);
+    }
+    
+    // 2. Custom Selection Filter (Only applies in Custom Mode)
     if (viewMode === 'custom') {
-      return customSelection.has(r.id);
+      result = result.filter(r => selectedIds.has(r.id));
     }
-    return true; // summary and detail show all
-  });
 
-  // Calculate totals for summary view based on filtered data
-  const summary = Object.values(filteredData.reduce((acc, row) => {
-    if (!acc[row.name]) acc[row.name] = { name: row.name, payLevel: row.payLevel, totalHours: 0, totalPay: 0, items: [] };
-    acc[row.name].totalHours += row.hours;
-    const pay = row.manual_rate_override !== undefined && row.manual_rate_override !== null
-       ? row.manual_rate_override * (rates.pay_codes.definitions.find(d => d.label === row.code)?.type === 'flat' ? 1 : row.hours)
-       : (row.total || 0);
-    acc[row.name].totalPay += pay;
-    acc[row.name].items.push(row);
-    return acc;
-  }, {} as Record<string, any>));
+    // 3. Sort
+    result.sort((a, b) => {
+      let cmp = 0;
+      if (sortField === 'name') cmp = a.name.localeCompare(b.name);
+      if (sortField === 'payLevel') {
+        // Try to sort by Rank ID if possible, else string
+        const rankA = rates.pay_levels[a.payLevel]?.rank || 99;
+        const rankB = rates.pay_levels[b.payLevel]?.rank || 99;
+        cmp = rankA - rankB || a.payLevel.localeCompare(b.payLevel);
+        // Secondary sort by name
+        if (cmp === 0) cmp = a.name.localeCompare(b.name);
+      }
+      if (sortField === 'date') {
+        const dateA = a.startDate || '';
+        const dateB = b.startDate || '';
+        cmp = dateA.localeCompare(dateB);
+      }
+      return sortAsc ? cmp : -cmp;
+    });
+
+    return result;
+  }, [data, search, filterLevel, filterCode, sortField, sortAsc, viewMode, selectedIds, rates]);
+
+  // --- AGGREGATION FOR SUMMARY VIEW ---
+  const summaryData = useMemo(() => {
+    const groups = new Map<string, {
+      name: string,
+      payLevel: string,
+      codes: Map<string, { label: string, hours: number, total: number }>,
+      grandTotal: number,
+      totalHours: number
+    }>();
+
+    processedData.forEach(row => {
+      if (!groups.has(row.name)) {
+        groups.set(row.name, { 
+          name: row.name, 
+          payLevel: row.payLevel, 
+          codes: new Map(), 
+          grandTotal: 0, 
+          totalHours: 0 
+        });
+      }
+      
+      const emp = groups.get(row.name)!;
+      
+      // Calculate Effective Total (Handle Overrides)
+      let pay = row.total || 0;
+      if (row.manual_rate_override !== undefined && row.manual_rate_override !== null) {
+         const def = rates.pay_codes.definitions.find(d => d.label === row.code);
+         const isFlat = def?.type === 'flat';
+         pay = row.manual_rate_override * (isFlat ? 1 : row.hours);
+      }
+
+      emp.grandTotal += pay;
+      emp.totalHours += row.hours;
+
+      if (!emp.codes.has(row.code)) {
+        emp.codes.set(row.code, { label: row.code, hours: 0, total: 0 });
+      }
+      const codeStats = emp.codes.get(row.code)!;
+      codeStats.hours += row.hours;
+      codeStats.total += pay;
+    });
+
+    return Array.from(groups.values());
+  }, [processedData, rates]);
+
+  // --- RENDERERS ---
 
   const SummaryView = () => (
-    <div className="space-y-4">
-      <h3 className="text-center font-bold text-lg uppercase mb-4 underline">Payroll Summary</h3>
-      <table className="w-full text-left border-collapse text-sm">
-        <thead>
-          <tr className="border-b-2 border-black">
-            <th className="py-2">Employee Name</th>
-            <th className="py-2">Pay Level</th>
-            <th className="py-2 text-right">Total Hours</th>
-            <th className="py-2 text-right">Total Pay</th>
-          </tr>
-        </thead>
-        <tbody>
-          {summary.map((emp, i) => (
-            <tr key={i} className="border-b border-gray-200">
-              <td className="py-2">{emp.name}</td>
-              <td className="py-2">{emp.payLevel}</td>
-              <td className="py-2 text-right">{emp.totalHours.toFixed(2)}</td>
-              <td className="py-2 text-right font-bold">${emp.totalPay.toFixed(2)}</td>
-            </tr>
-          ))}
-          <tr className="border-t-2 border-black font-bold text-base">
-            <td colSpan={2} className="py-3">Grand Total</td>
-            <td className="py-3 text-right">{summary.reduce((s, e) => s + e.totalHours, 0).toFixed(2)}</td>
-            <td className="py-3 text-right">${summary.reduce((s, e) => s + e.totalPay, 0).toFixed(2)}</td>
-          </tr>
-        </tbody>
-      </table>
+    <div className="space-y-6">
+      <div className="text-center border-b-2 border-black pb-2 mb-4">
+        <h3 className="font-bold text-xl uppercase tracking-widest">Payroll Summary Report</h3>
+        <p className="text-xs text-gray-500">Grouped by Employee • {processedData.length} records found</p>
+      </div>
+
+      <div className="space-y-4">
+        {summaryData.map((emp) => (
+          <div key={emp.name} className="break-inside-avoid border border-gray-300 rounded-sm overflow-hidden">
+            {/* Employee Header */}
+            <div className="bg-gray-100 p-2 flex justify-between items-center border-b border-gray-300">
+               <div>
+                 <span className="font-bold text-gray-900 text-sm">{emp.name}</span>
+                 <span className="ml-2 text-[10px] text-gray-500 uppercase tracking-wider">{emp.payLevel}</span>
+               </div>
+               <div className="text-right">
+                 <span className="font-mono font-bold text-sm">${emp.grandTotal.toFixed(2)}</span>
+               </div>
+            </div>
+            
+            {/* Pay Code Breakdown */}
+            <table className="w-full text-xs">
+               <tbody>
+                 {Array.from(emp.codes.values()).map((code) => (
+                   <tr key={code.label} className="border-b border-gray-100 last:border-0">
+                     <td className="pl-4 py-1 text-gray-600 w-1/2">{code.label}</td>
+                     <td className="py-1 text-right w-1/4">{code.hours.toFixed(2)} {code.label.includes('flat') ? 'qty' : 'hrs'}</td>
+                     <td className="pr-2 py-1 text-right w-1/4 font-medium text-gray-800">${code.total.toFixed(2)}</td>
+                   </tr>
+                 ))}
+                 <tr className="bg-gray-50 font-bold">
+                    <td className="pl-4 py-1 text-gray-900">Total</td>
+                    <td className="py-1 text-right">{emp.totalHours.toFixed(2)} hrs</td>
+                    <td className="pr-2 py-1 text-right">${emp.grandTotal.toFixed(2)}</td>
+                 </tr>
+               </tbody>
+            </table>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-8 border-t-2 border-black pt-4 flex justify-between items-center text-sm font-bold">
+         <span>Grand Total (All Employees)</span>
+         <span className="text-xl">${summaryData.reduce((acc, e) => acc + e.grandTotal, 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+      </div>
     </div>
   );
 
   const DetailView = () => (
     <div>
-      <h3 className="text-center font-bold text-lg uppercase mb-4 underline">
-        {viewMode === 'hourly_only' ? 'Hourly & User-Pay Detail' : 'Full Audit Detail'}
-      </h3>
-      <table className="w-full text-left border-collapse text-xs">
+      <div className="text-center border-b-2 border-black pb-2 mb-4">
+        <h3 className="font-bold text-xl uppercase tracking-widest">Detailed Audit Log</h3>
+        <p className="text-xs text-gray-500">Line-by-line breakdown • Sorted by {sortField}</p>
+      </div>
+
+      <table className="w-full text-left border-collapse text-[10px] md:text-xs">
          <thead>
-           <tr className="border-b-2 border-black">
-             <th className="py-1">Employee</th>
-             <th className="py-1">Pay Level</th>
-             <th className="py-1">Pay Code</th>
-             <th className="py-1 text-right">Hrs/Qty</th>
-             <th className="py-1 text-right">Rate</th>
-             <th className="py-1 text-right">Total</th>
+           <tr className="border-b-2 border-black bg-gray-50">
+             <th className="py-1 px-1">Employee</th>
+             <th className="py-1 px-1">Pay Code</th>
+             <th className="py-1 px-1">Date</th>
+             <th className="py-1 px-1">Time</th>
+             <th className="py-1 px-1 text-right">Hrs/Qty</th>
+             <th className="py-1 px-1 text-right">Rate</th>
+             <th className="py-1 px-1 text-right">Total</th>
            </tr>
          </thead>
          <tbody>
-           {filteredData.map((row, i) => (
-             <tr key={i} className="border-b border-gray-100">
-               <td className="py-1 font-medium">{row.name}</td>
-               <td className="py-1 text-gray-500">{row.payLevel}</td>
-               <td className="py-1">{row.code}</td>
-               <td className="py-1 text-right">{row.hours.toFixed(2)}</td>
-               <td className="py-1 text-right">{row.manual_rate_override ? `*${row.manual_rate_override}` : (row.rate ?? '-')}</td>
-               <td className="py-1 text-right font-semibold">${(row.total || 0).toFixed(2)}</td>
-             </tr>
-           ))}
-           <tr className="border-t-2 border-black font-bold text-sm bg-gray-50">
-              <td colSpan={3} className="py-2">Total</td>
-              <td className="py-2 text-right">{filteredData.reduce((acc, r) => acc + r.hours, 0).toFixed(2)}</td>
-              <td></td>
-              <td className="py-2 text-right">${filteredData.reduce((acc, r) => acc + (r.total||0), 0).toFixed(2)}</td>
-           </tr>
+           {processedData.map((row, i) => {
+             const pay = row.manual_rate_override !== undefined && row.manual_rate_override !== null
+               ? row.manual_rate_override * (rates.pay_codes.definitions.find(d => d.label === row.code)?.type === 'flat' ? 1 : row.hours)
+               : (row.total || 0);
+
+             return (
+               <tr key={i} className="border-b border-gray-200 even:bg-gray-50/50 break-inside-avoid">
+                 <td className="py-1 px-1 font-medium whitespace-nowrap">
+                    {row.name}
+                    <div className="text-[9px] text-gray-400">{row.payLevel}</div>
+                 </td>
+                 <td className="py-1 px-1">{row.code}</td>
+                 <td className="py-1 px-1 whitespace-nowrap">{row.startDate || '-'}</td>
+                 <td className="py-1 px-1 whitespace-nowrap">{row.startTime ? `${row.startTime}-${row.endTime}` : '-'}</td>
+                 <td className="py-1 px-1 text-right">{row.hours.toFixed(2)}</td>
+                 <td className="py-1 px-1 text-right">{row.manual_rate_override ? `*${row.manual_rate_override}` : (row.rate ?? '-')}</td>
+                 <td className="py-1 px-1 text-right font-bold">${pay.toFixed(2)}</td>
+               </tr>
+             )
+           })}
          </tbody>
+         <tfoot>
+           <tr className="bg-gray-100 font-bold border-t-2 border-black text-sm">
+              <td colSpan={4} className="py-2 px-1 text-right">Report Totals:</td>
+              <td className="py-2 px-1 text-right">{processedData.reduce((acc, r) => acc + r.hours, 0).toFixed(2)}</td>
+              <td></td>
+              <td className="py-2 px-1 text-right">${processedData.reduce((acc, r) => {
+                 const p = r.manual_rate_override !== undefined && r.manual_rate_override !== null
+                   ? r.manual_rate_override * (rates.pay_codes.definitions.find(d => d.label === r.code)?.type === 'flat' ? 1 : r.hours)
+                   : (r.total || 0);
+                 return acc + p;
+              }, 0).toFixed(2)}</td>
+           </tr>
+         </tfoot>
       </table>
     </div>
   );
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
-      <div className="bg-white w-full max-w-6xl h-[95vh] rounded-xl shadow-2xl flex flex-col overflow-hidden">
-        {/* Header - No Print */}
-        <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-900 text-white no-print">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
+      <div className="bg-white w-full max-w-7xl h-[95vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-gray-700">
+        
+        {/* TOP BAR - No Print */}
+        <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-slate-900 text-white no-print shrink-0">
            <div className="flex items-center gap-3">
-             <Printer className="text-blue-400" />
-             <h2 className="text-xl font-bold">Print & Finalize</h2>
+             <div className="bg-blue-600 p-2 rounded-lg"><Printer size={20} className="text-white" /></div>
+             <div>
+               <h2 className="text-lg font-bold">Print & Finalize</h2>
+               <p className="text-xs text-slate-400">Configure report layout and sorting before printing</p>
+             </div>
            </div>
-           <button onClick={onClose} className="p-2 hover:bg-white/20 rounded-full"><X size={20}/></button>
+           <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors"><X size={24}/></button>
         </div>
 
-        {/* Content */}
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
-           {/* Sidebar Options - No Print */}
-           <div className="w-full md:w-72 bg-gray-50 p-4 border-r border-gray-200 flex flex-col gap-4 no-print overflow-y-auto">
+           
+           {/* SIDEBAR CONTROLS - No Print */}
+           <div className="w-full md:w-80 bg-slate-50 border-r border-gray-200 flex flex-col gap-6 p-5 no-print overflow-y-auto">
               
-              <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
-                <label className="block text-xs font-bold text-gray-400 uppercase tracking-wide mb-3">View Mode</label>
-                <div className="space-y-2">
-                   {[
-                     { id: 'summary', label: 'Overall Summary', desc: 'Totals per employee' },
-                     { id: 'detail', label: 'Detailed Audit', desc: 'Every line item' },
-                     { id: 'hourly_only', label: 'Hourly / User Pay', desc: 'Specific pay groups only' },
-                     { id: 'custom', label: 'Custom Selection', desc: 'Select specific lines' }
-                   ].map((m) => (
-                     <button 
-                       key={m.id}
-                       onClick={() => setViewMode(m.id as ViewMode)}
-                       className={`w-full text-left px-3 py-2 rounded-lg border transition-all ${viewMode === m.id ? 'bg-blue-600 text-white border-blue-600 shadow-md' : 'bg-white text-gray-700 border-gray-200 hover:border-blue-400'}`}
-                     >
-                       <div className="font-bold text-sm">{m.label}</div>
-                       <div className={`text-xs ${viewMode === m.id ? 'text-blue-100' : 'text-gray-400'}`}>{m.desc}</div>
-                     </button>
-                   ))}
+              {/* 1. View Mode */}
+              <div className="space-y-3">
+                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Report Layout</label>
+                <div className="grid grid-cols-1 gap-2">
+                   <button 
+                     onClick={() => setViewMode('summary')}
+                     className={`flex items-center gap-3 p-3 rounded-lg border text-sm font-medium transition-all ${viewMode === 'summary' ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-sm' : 'bg-white border-gray-200 text-gray-600 hover:border-blue-300'}`}
+                   >
+                     <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${viewMode === 'summary' ? 'border-blue-600 bg-blue-600' : 'border-gray-400'}`}>
+                        {viewMode === 'summary' && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
+                     </div>
+                     Summary by Employee
+                   </button>
+                   <button 
+                     onClick={() => setViewMode('detail')}
+                     className={`flex items-center gap-3 p-3 rounded-lg border text-sm font-medium transition-all ${viewMode === 'detail' ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-sm' : 'bg-white border-gray-200 text-gray-600 hover:border-blue-300'}`}
+                   >
+                     <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${viewMode === 'detail' ? 'border-blue-600 bg-blue-600' : 'border-gray-400'}`}>
+                        {viewMode === 'detail' && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
+                     </div>
+                     Full Detailed Audit
+                   </button>
+                   <button 
+                     onClick={() => setViewMode('custom')}
+                     className={`flex items-center gap-3 p-3 rounded-lg border text-sm font-medium transition-all ${viewMode === 'custom' ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-sm' : 'bg-white border-gray-200 text-gray-600 hover:border-blue-300'}`}
+                   >
+                     <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${viewMode === 'custom' ? 'border-blue-600 bg-blue-600' : 'border-gray-400'}`}>
+                        {viewMode === 'custom' && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
+                     </div>
+                     Custom Selection
+                   </button>
                 </div>
               </div>
 
-              {viewMode === 'custom' && (
-                <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex-1 overflow-auto">
-                   <div className="flex justify-between items-center mb-2">
-                     <label className="text-xs font-bold text-gray-400 uppercase">Select Rows</label>
-                     <button 
-                       onClick={() => setCustomSelection(new Set(data.map(d=>d.id)))}
-                       className="text-xs text-blue-600 hover:underline"
+              <hr className="border-gray-200" />
+
+              {/* 2. Filters & Sorting */}
+              <div className="space-y-4">
+                <label className="flex items-center gap-2 text-xs font-bold text-slate-400 uppercase tracking-wider">
+                  <Filter size={14} /> Report Options
+                </label>
+                
+                {/* Search */}
+                <div className="relative">
+                  <Search className="absolute left-3 top-2.5 text-gray-400" size={14} />
+                  <input 
+                    className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="Search names..."
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                  />
+                </div>
+
+                {/* Sort */}
+                <div className="grid grid-cols-2 gap-2">
+                   <div>
+                     <label className="block text-[10px] text-gray-500 mb-1">Sort By</label>
+                     <select 
+                       className="w-full text-sm border border-gray-300 rounded-lg p-2 bg-white"
+                       value={sortField}
+                       onChange={(e) => setSortField(e.target.value as SortField)}
                      >
-                       Select All
+                       <option value="payLevel">Pay Level (Rank)</option>
+                       <option value="name">Name (A-Z)</option>
+                       <option value="date">Date</option>
+                     </select>
+                   </div>
+                   <div>
+                     <label className="block text-[10px] text-gray-500 mb-1">Direction</label>
+                     <button 
+                       onClick={() => setSortAsc(!sortAsc)}
+                       className="w-full text-sm border border-gray-300 rounded-lg p-2 bg-white flex items-center justify-between hover:bg-gray-50"
+                     >
+                       {sortAsc ? 'Ascending' : 'Descending'}
+                       <ArrowUpDown size={14} className="text-gray-400" />
                      </button>
                    </div>
-                   <div className="space-y-1">
-                     {data.map(row => (
-                       <div key={row.id} className="flex items-center gap-2 text-sm">
-                         <button onClick={() => toggleSelection(row.id)}>
-                            {customSelection.has(row.id) 
-                              ? <CheckSquare size={16} className="text-blue-600" /> 
-                              : <Square size={16} className="text-gray-300" />}
-                         </button>
-                         <span className="truncate">{row.name} - {row.code}</span>
-                       </div>
-                     ))}
+                </div>
+
+                {/* Filter Pay Level */}
+                <div>
+                   <label className="block text-[10px] text-gray-500 mb-1">Filter Level</label>
+                   <select 
+                     className="w-full text-sm border border-gray-300 rounded-lg p-2 bg-white"
+                     value={filterLevel}
+                     onChange={e => setFilterLevel(e.target.value)}
+                   >
+                     <option value="all">All Levels</option>
+                     <option value="Hourly Only">Hourly Only</option>
+                     <option value="User-Pay-Level">User-Pay-Level</option>
+                     {Object.keys(rates.pay_levels).map(l => <option key={l} value={l}>{l}</option>)}
+                   </select>
+                </div>
+              </div>
+
+              {/* 3. Custom Selector (Only visible in Custom Mode) */}
+              {viewMode === 'custom' && (
+                <div className="flex-1 flex flex-col bg-white border border-gray-200 rounded-lg shadow-inner overflow-hidden min-h-[200px]">
+                   <div className="p-2 bg-gray-100 border-b border-gray-200 flex justify-between items-center">
+                      <span className="text-xs font-bold text-gray-500">Rows Matching Filter</span>
+                      <div className="space-x-2">
+                        <button onClick={() => {
+                           const newIds = new Set(selectedIds);
+                           processedData.forEach(r => newIds.add(r.id));
+                           setSelectedIds(newIds);
+                        }} className="text-[10px] text-blue-600 font-bold hover:underline">Select All</button>
+                        <button onClick={() => setSelectedIds(new Set())} className="text-[10px] text-red-500 font-bold hover:underline">Clear</button>
+                      </div>
+                   </div>
+                   <div className="flex-1 overflow-y-auto p-2 space-y-1">
+                      {processedData.length === 0 ? (
+                        <div className="p-4 text-center text-xs text-gray-400">No rows match your filters.</div>
+                      ) : (
+                        processedData.map(row => (
+                          <button 
+                            key={row.id}
+                            onClick={() => {
+                              const newSet = new Set(selectedIds);
+                              if (newSet.has(row.id)) newSet.delete(row.id);
+                              else newSet.add(row.id);
+                              setSelectedIds(newSet);
+                            }}
+                            className={`w-full text-left p-2 rounded flex items-center gap-2 text-xs transition-colors ${selectedIds.has(row.id) ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-50'}`}
+                          >
+                             {selectedIds.has(row.id) ? <CheckSquare size={14}/> : <Square size={14} className="text-gray-300"/>}
+                             <div className="truncate flex-1">
+                               <span className="font-bold">{row.name}</span> <span className="text-gray-400">|</span> {row.code}
+                             </div>
+                          </button>
+                        ))
+                      )}
                    </div>
                 </div>
               )}
-              
-              <div className="mt-auto pt-4 border-t border-gray-200">
-                <button onClick={handlePrint} className="w-full btn-primary bg-blue-700 text-white py-3 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 hover:bg-blue-800 transform active:scale-95 transition-all">
-                  <Printer size={20} /> Print Report
+
+              <div className="mt-auto">
+                <button onClick={handlePrint} className="w-full btn-primary bg-slate-900 text-white py-3 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 hover:bg-black transform active:scale-95 transition-all">
+                  <Printer size={20} /> Print Final Report
                 </button>
               </div>
            </div>
 
-           {/* Preview Area - This is what prints */}
-           <div className="flex-1 p-8 overflow-y-auto bg-white" id="print-area">
-              {/* Print Header */}
-              <div className="mb-6 border-b-2 border-black pb-4">
-                 <div className="flex justify-between items-start mb-6">
+           {/* PREVIEW AREA */}
+           <div className="flex-1 bg-white overflow-y-auto p-8 relative">
+              <div id="print-area" className="max-w-[1100px] mx-auto min-h-[1000px] bg-white print:p-0 print:w-full">
+                 
+                 {/* Print Header */}
+                 <div className="flex justify-between items-start border-b-4 border-slate-900 pb-4 mb-6">
                     <div className="flex items-center gap-4">
-                       {/* Logo */}
-                       <div className="w-16 h-16 bg-red-800 text-white flex items-center justify-center font-bold rounded-lg text-2xl shadow-sm print:shadow-none">G</div>
+                       <div className="w-14 h-14 bg-red-700 text-white rounded-lg flex items-center justify-center text-2xl font-bold print:border print:border-red-700">G</div>
                        <div>
-                         <h1 className="text-3xl font-bold uppercase tracking-wide text-gray-900">Gem County Payroll</h1>
-                         <p className="text-sm text-gray-600">Period Ending: {new Date().toLocaleDateString()}</p>
+                          <h1 className="text-2xl font-black uppercase tracking-tight text-slate-900">Gem County Payroll</h1>
+                          <div className="flex gap-4 text-xs font-medium text-slate-500 mt-1">
+                             <span>Run Date: {new Date().toLocaleDateString()}</span>
+                             <span>•</span>
+                             <span>Status: Final Draft</span>
+                          </div>
                        </div>
                     </div>
-                    <div className="text-right text-sm text-gray-500">
-                       <div><strong>Generated:</strong> {new Date().toLocaleString()}</div>
-                       <div className="mt-1 px-2 py-1 bg-gray-100 inline-block rounded border border-gray-200 print:border-none">FINAL REPORT</div>
+                    <div className="text-right">
+                       <div className="text-xs text-slate-400 uppercase font-bold tracking-wider mb-1">Report Type</div>
+                       <div className="bg-slate-100 px-3 py-1 rounded text-sm font-bold text-slate-700 border border-slate-200">
+                         {viewMode === 'summary' ? 'Payroll Summary' : 'Detailed Audit Log'}
+                       </div>
                     </div>
                  </div>
 
-                 {/* Signatures Moved to Top */}
-                 <div className="grid grid-cols-2 gap-12 mt-8 mb-2">
+                 {/* Signatures Area */}
+                 <div className="mb-8 grid grid-cols-2 gap-12 bg-slate-50 p-4 rounded-lg border border-slate-100 print:bg-white print:border-none print:p-0">
                     <div>
-                      <div className="h-8 border-b border-black"></div>
-                      <div className="flex justify-between mt-1">
-                        <span className="text-xs uppercase font-bold text-gray-500">Prepared By</span>
-                        <span className="text-xs text-gray-400">Date</span>
-                      </div>
+                       <div className="h-8 border-b border-slate-400 mb-1"></div>
+                       <div className="flex justify-between text-[10px] uppercase font-bold text-slate-400">
+                          <span>Prepared By</span>
+                          <span>Date</span>
+                       </div>
                     </div>
                     <div>
-                      <div className="h-8 border-b border-black"></div>
-                      <div className="flex justify-between mt-1">
-                        <span className="text-xs uppercase font-bold text-gray-500">Authorized Signature</span>
-                        <span className="text-xs text-gray-400">Date</span>
-                      </div>
+                       <div className="h-8 border-b border-slate-400 mb-1"></div>
+                       <div className="flex justify-between text-[10px] uppercase font-bold text-slate-400">
+                          <span>Authorized Signature</span>
+                          <span>Date</span>
+                       </div>
                     </div>
                  </div>
-              </div>
 
-              {/* Dynamic Content */}
-              <div className="min-h-[500px]">
-                {viewMode === 'summary' && <SummaryView />}
-                {(viewMode === 'detail' || viewMode === 'hourly_only' || viewMode === 'custom') && <DetailView />}
-              </div>
-              
-              {/* Footer */}
-              <div className="mt-8 pt-4 border-t border-gray-200 text-center text-xs text-gray-400">
-                Gem County Payroll Pro • Confidential Document
+                 {/* Content */}
+                 <div className="print-content">
+                    {viewMode === 'summary' && <SummaryView />}
+                    {(viewMode === 'detail' || viewMode === 'custom') && <DetailView />}
+                 </div>
+
+                 {/* Print Footer */}
+                 <div className="mt-8 pt-8 border-t border-gray-100 text-center text-[10px] text-gray-400">
+                    Generated by Gem Payroll System • Confidential Personnel Record
+                 </div>
               </div>
            </div>
         </div>
