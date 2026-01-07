@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { PayrollRow, Employee, MasterRates } from '../types';
 import { calculatePayRow, getRowColor } from '../services/payrollService';
-import { saveJsonFile, ensureSystemFolders } from '../services/driveService';
+import { saveJsonFile, SystemIds } from '../services/driveService'; // PATCH 1: Removed ensureSystemFolders, added SystemIds
 import { 
   Edit2, Printer, RefreshCw, FileUp, 
   AlertTriangle, UploadCloud, ChevronRight, 
@@ -15,12 +15,13 @@ interface EditorProps {
   setData: (data: PayrollRow[]) => void;
   employees: Employee[];
   rates: MasterRates;
+  systemIds: SystemIds | null; // PATCH 2: Added this prop to receive connection data
 }
 
 type ViewMode = 'summary' | 'detail';
 type FilterMode = 'all' | 'flagged' | 'standby';
 
-export default function Editor({ data, setData, employees, rates }: EditorProps) {
+export default function Editor({ data, setData, employees, rates, systemIds }: EditorProps) {
   const [editingRow, setEditingRow] = useState<PayrollRow | null>(null);
   const [showPrintWizard, setShowPrintWizard] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -155,8 +156,14 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
     alert('Draft refreshed with latest rates/staff settings.');
   };
 
+  // PATCH 3: Updated Save function to use the passed systemIds prop
   const handleSaveToDrive = async () => {
     if (data.length === 0) return;
+    if (!systemIds) {
+        alert("System connection lost. Please refresh the page to reconnect.");
+        return;
+    }
+
     const dateStr = new Date().toISOString().split('T')[0];
     const defaultName = `Payroll_Run_${dateStr}`;
 
@@ -174,18 +181,18 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
 
     try {
       setIsSaving(true);
-      const folders = await ensureSystemFolders();
-      await saveJsonFile(filename, { meta: { date: dateStr, stats }, rows: data }, folders.yearFolderId);
+      // Use the ID from the prop instead of finding it again
+      await saveJsonFile(filename, { meta: { date: dateStr, stats }, rows: data }, systemIds.currentYearId);
       alert(`Successfully saved to Drive as: ${filename}`);
     } catch (err) {
       console.error(err);
-      alert("Failed to save to Drive. Ensure you are connected in the Dashboard.");
+      alert("Failed to save to Drive. Check console for details.");
     } finally {
       setIsSaving(false);
     }
   };
 
-  // --- UPDATED CSV IMPORT ---
+  // --- CSV IMPORT ---
   const handleCSVImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -217,11 +224,10 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
         const cols = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
         const cleanCols = cols.map(c => c.replace(/^"|"$/g, '').trim());
         
-        // Skip empty or summary lines (need at least 11 columns based on your file)
+        // Skip empty or summary lines
         if (cleanCols.length < 10) continue;
 
         // MAPPING BASED ON YOUR CSV STRUCTURE
-        // 0: Last Name, 1: First Name, 5: Start Date, 6: Start Time, 7: End Date, 8: End Time, 9: Pay Code, 10: Hours
         const lastName = cleanCols[0];
         const firstName = cleanCols[1];
         
@@ -399,7 +405,6 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
                                     <ChevronRight size={14} />
                                   </div>
                                   <span className="font-bold text-gray-800">{code}</span>
-                                  {/* SWAP LOGIC PART A: Left Side Info */}
                                   <span className="text-xs text-gray-600 opacity-70 ml-2">
                                     {isFlatRate 
                                       ? `(${stats.totalHours.toFixed(2)} hrs total)` 
@@ -408,7 +413,6 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
                                </div>
 
                                <div className="text-right flex gap-6 text-sm">
-                                  {/* SWAP LOGIC PART B: Right Side Info */}
                                   <span className="w-24 text-gray-800 font-medium text-right">
                                     {isFlatRate 
                                       ? `${stats.rows.length} Qty` 
@@ -435,7 +439,6 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
                                    <tbody>
                                      {stats.rows.map(row => (
                                        <tr key={row.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50">
-                                         {/* FIXED: Explicit Date and Time Columns */}
                                          <td className="py-2 text-gray-600">{row.startDate || '-'}</td>
                                          <td className="py-2 text-gray-600 text-[10px]">
                                             {row.startTime ? `${row.startTime} - ${row.endTime}` : '-'}
@@ -503,11 +506,9 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
                           <span className="font-medium text-gray-700 text-sm">{row.code}</span>
                           {row.manual_note && <div className="text-[10px] text-blue-600 mt-0.5">{row.manual_note}</div>}
                         </td>
-                        {/* FIXED: Date Column */}
                         <td className="p-3 text-sm text-gray-700">
                           {row.startDate || <span className="text-gray-300">-</span>}
                         </td>
-                        {/* FIXED: Time Column */}
                         <td className="p-3 text-xs text-gray-600 font-mono">
                           {row.startTime ? `${row.startTime} - ${row.endTime}` : <span className="text-gray-300">-</span>}
                         </td>
@@ -562,7 +563,6 @@ export default function Editor({ data, setData, employees, rates }: EditorProps)
         />
       )}
 
-      {/* Styles for new buttons */}
       <style>{`
         .btn-icon {
           @apply p-2 rounded-lg bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 hover:text-blue-600 transition-all shadow-sm flex items-center justify-center;

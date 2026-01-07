@@ -1,10 +1,12 @@
+// App.tsx
 import { useState, useEffect } from 'react';
 import Welcome from './components/Welcome';
 import Layout from './components/Layout';
 import PayrollPage from './components/PayrollPage'; 
 import Settings from './components/Settings';
 import Reports from './components/Reports';
-import { initGapi, initGis, requestAccessToken, ensureSystemFolders, SystemIds } from './services/driveService';
+// ADD fetchSystemConfig to the imports below:
+import { initGapi, initGis, requestAccessToken, ensureSystemFolders, fetchSystemConfig, SystemIds } from './services/driveService';
 import { MasterRates, Employee, PayrollRow, AppConfig } from './types';
 import { INITIAL_RATES, INITIAL_EMPLOYEES, INITIAL_CONFIG } from './constants';
 
@@ -54,6 +56,24 @@ export default function App() {
       const ids = await ensureSystemFolders();
       setSystemIds(ids);
       console.log("System Folders Located:", ids);
+
+      // --- NEW: FETCH CONFIG DATA ---
+      const data = await fetchSystemConfig(ids.configId);
+      
+      if (data.rates) {
+        console.log("Rates Loaded");
+        setRates(data.rates);
+      }
+      if (data.employees) {
+        console.log("Personnel Loaded");
+        setEmployees(data.employees);
+      }
+      if (data.config) {
+        console.log("App Config Loaded");
+        setConfig(data.config);
+      }
+      // ------------------------------
+
     } catch (err) {
       console.error("System Load Error", err);
     }

@@ -1,83 +1,66 @@
-import React from 'react';
 import { MasterRates } from '../types';
 
 interface RateMatrixProps {
   rates: MasterRates;
-  setRates: (r: MasterRates) => void;
+  setRates: (rates: MasterRates) => void;
 }
 
 export default function RateMatrix({ rates, setRates }: RateMatrixProps) {
-  const payCodes = rates.pay_codes.definitions;
-  const payLevels = Object.keys(rates.pay_levels).sort();
-
+  
   const handleRateChange = (level: string, code: string, val: string) => {
-    const num = val === '' ? null : parseFloat(val);
+    const num = parseFloat(val);
+    if (isNaN(num)) return;
+
+    // Deep copy state to update
     const newRates = { ...rates };
+    
+    if (!newRates.pay_levels[level]) return;
     if (!newRates.pay_levels[level].rates) newRates.pay_levels[level].rates = {};
+    
     newRates.pay_levels[level].rates[code] = num;
     setRates(newRates);
   };
 
+  const payCodes = rates.pay_codes.definitions;
+  const levels = Object.keys(rates.pay_levels).sort();
+
   return (
-    <div className="flex flex-col h-full bg-white">
-      <div className="p-4 border-b border-gray-200 bg-gray-50 flex justify-between items-center">
-        <div>
-          <h2 className="text-xl font-bold text-gray-900">Master Pay Rate Matrix</h2>
-          <p className="text-sm text-gray-500">Edit rates for each Pay Level. Scroll right to see all codes.</p>
-        </div>
+    <div className="flex flex-col h-full">
+      <div className="p-4 bg-yellow-50 border-b border-yellow-100 text-yellow-800 text-sm">
+        <strong>Warning:</strong> Changes here affect all calculations immediately.
       </div>
       
-      <div className="flex-1 overflow-auto relative">
-        <table className="border-collapse w-full min-w-[1500px]">
-          <thead className="sticky top-0 z-30 bg-white shadow-lg ring-1 ring-gray-200">
-             <tr>
-               {/* Sticky Name Column Header */}
-               <th className="sticky left-0 top-0 z-40 bg-gray-900 text-white p-3 text-left text-sm font-bold min-w-[200px] border-r border-gray-700 shadow-md">
-                 Pay Level
-               </th>
-               {/* Color coded headers */}
-               {payCodes.map(pc => (
-                 <th 
-                   key={pc.code} 
-                   className="p-3 text-left text-xs font-bold text-gray-800 border-r border-gray-200 min-w-[120px]"
-                   style={{ backgroundColor: pc.color }}
-                 >
-                   <div className="flex flex-col">
-                     <span className="uppercase tracking-wider">{pc.label}</span>
-                     <span className="text-[10px] opacity-75 font-normal">{pc.type}</span>
-                   </div>
-                 </th>
-               ))}
-             </tr>
+      <div className="flex-1 overflow-auto p-4">
+        <table className="w-full border-collapse text-sm">
+          <thead>
+            <tr>
+              <th className="border p-2 bg-gray-100 text-left sticky top-0 z-10">Pay Level</th>
+              {payCodes.map(pc => (
+                <th key={pc.code} className="border p-2 bg-gray-50 w-32 sticky top-0 z-10">
+                  <div className="font-bold text-gray-700">{pc.label}</div>
+                  <div className="text-[10px] text-gray-400 font-normal">{pc.type}</div>
+                </th>
+              ))}
+            </tr>
           </thead>
           <tbody>
-            {payLevels.map((level, idx) => (
-              <tr key={level} className="hover:bg-gray-50 transition-colors border-b border-gray-100">
-                {/* Sticky Name Column Body */}
-                <td className="sticky left-0 z-20 bg-white p-3 text-sm font-bold text-gray-800 border-r border-gray-200 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] group-hover:bg-gray-50">
-                  <div className="flex flex-col">
-                    <span>{level}</span>
-                    <span className="text-[10px] text-gray-400 font-normal uppercase">Rank {rates.pay_levels[level].rank}</span>
-                  </div>
-                </td>
-                
-                {/* Inputs colored by column */}
+            {levels.map(lvl => (
+              <tr key={lvl}>
+                <td className="border p-2 font-bold bg-gray-50">{lvl}</td>
                 {payCodes.map(pc => {
-                  const val = rates.pay_levels[level]?.rates?.[pc.code];
-                  // Lighten the color for the cell background
-                  const bgStyle = { backgroundColor: `${pc.color}15` }; // 15 = very low opacity hex
-
+                  // SAFE ACCESS: Check if rate exists, otherwise 0
+                  const currentRate = rates.pay_levels[lvl]?.rates?.[pc.code] ?? 0;
+                  
                   return (
-                    <td key={pc.code} className="p-0 border-r border-gray-100 relative" style={bgStyle}>
-                      <div className="w-full h-full flex items-center justify-center px-1">
-                        <span className="text-gray-400 text-xs mr-1">$</span>
+                    <td key={pc.code} className="border p-1">
+                      <div className="relative">
+                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400">$</span>
                         <input 
-                          type="number"
+                          type="number" 
                           step="0.01"
-                          className="w-full bg-transparent py-3 text-sm font-mono text-right focus:bg-white focus:ring-2 focus:ring-blue-500 focus:z-10 outline-none text-gray-800 placeholder-gray-300 transition-all rounded-sm"
-                          placeholder="-"
-                          value={val === null || val === undefined ? '' : val}
-                          onChange={(e) => handleRateChange(level, pc.code, e.target.value)}
+                          className="w-full pl-6 pr-2 py-1 rounded border border-transparent hover:border-gray-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-all text-right"
+                          value={currentRate}
+                          onChange={(e) => handleRateChange(lvl, pc.code, e.target.value)}
                         />
                       </div>
                     </td>

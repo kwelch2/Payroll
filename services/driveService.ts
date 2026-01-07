@@ -98,6 +98,38 @@ export async function ensureSystemFolders(): Promise<SystemIds> {
   return { rootId, configId, currentYearId };
 }
 
+export async function fetchSystemConfig(configFolderId: string) {
+  // Helper to find and load a specific file by name in the config folder
+  const loadConfigByName = async (filename: string) => {
+    try {
+      const q = `'${configFolderId}' in parents and name = '${filename}' and mimeType = 'application/json' and trashed = false`;
+      const response = await window.gapi.client.drive.files.list({
+        q: q,
+        fields: 'files(id)',
+      });
+      
+      const files = response.result.files;
+      if (files && files.length > 0) {
+        // Found it, now download content
+        return await loadJsonFile(files[0].id);
+      }
+      return null; // File doesn't exist yet
+    } catch (err) {
+      console.warn(`Could not load ${filename}`, err);
+      return null;
+    }
+  };
+
+  // Run all searches in parallel
+  const [rates, employees, config] = await Promise.all([
+    loadConfigByName('master_rates.json'),
+    loadConfigByName('personnel.json'),
+    loadConfigByName('app_config.json')
+  ]);
+
+  return { rates, employees, config };
+}
+
 // UPDATED: Lists all JSON files in the entire System folder (Current + Past years)
 export async function listAllPayrollRuns(rootId: string): Promise<DriveFile[]> {
   try {
