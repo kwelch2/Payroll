@@ -3,7 +3,7 @@ import { MasterRates, Employee, AppConfig } from '../types';
 import StaffDirectory from './StaffDirectory';
 import RateMatrix from './RateMatrix';
 import PayCodeEditor from './PayCodeEditor';
-import SystemDefs from './SystemDefs'; // Import the new component
+import SystemDefs from './SystemDefs';
 
 interface SettingsProps {
   rates: MasterRates;
@@ -54,7 +54,8 @@ export default function Settings({ rates, setRates, employees, setEmployees, con
         {activeTab === 'personnel' && (
           <StaffDirectory 
              employees={employees} 
-             setEmployees={setEmployees} 
+             setEmployees={setEmployees}
+             rates={rates}  // <--- ADD THIS LINE so the dropdowns work!
           />
         )}
 
