@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { FolderOpen, FilePlus } from 'lucide-react';
 import Editor from './Editor';
 import { PayrollRow, Employee, MasterRates } from '../types';
 import { listAllPayrollRuns, loadJsonFile, DriveFile, SystemIds } from '../services/driveService';
+import { calculatePayRow } from '../services/payrollService';
 
 interface PayrollPageProps {
   data: PayrollRow[];
@@ -17,6 +18,11 @@ export default function PayrollPage({ data, setData, employees, rates, systemIds
   const [fileList, setFileList] = useState<DriveFile[]>([]);
   const [isLoadingList, setIsLoadingList] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState("");
+  
+  // Ref for the hidden file input
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // --- ACTIONS ---
 
   const handleListFiles = async () => {
     if (!systemIds) {
@@ -31,7 +37,7 @@ export default function PayrollPage({ data, setData, employees, rates, systemIds
   };
 
   const handleLoadFile = async (file: DriveFile) => {
-    if(!confirm(`Load "${file.name}"? Unsaved changes will be lost.`)) return;
+    if(data.length > 0 && !confirm(`Load "${file.name}"? Unsaved changes will be lost.`)) return;
     
     setLoadingMsg("Downloading...");
     try {
@@ -50,36 +56,78 @@ export default function PayrollPage({ data, setData, employees, rates, systemIds
     }
   };
 
+  // Combined Action: Clear Data -> Open CSV Import
   const handleNewRun = () => {
     if(data.length > 0 && !confirm("Start a new run? Current rows will be cleared.")) return;
+    
     setData([]);
+    
+    // Automatically trigger the file picker
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''; // Reset input so same file can be selected again
+      fileInputRef.current.click();
+    }
   };
-  // 1. Add a ref to the hidden file input
-const fileInputRef = React.useRef<HTMLInputElement>(null);
 
-// 2. Update handleNewRun to click that input
-const handleNewRun = () => {
-  if (data.length > 0 && !confirm("Start a new run? This will clear current data.")) return;
-  
-  setData([]); // Clear data
-  
-  // Automatically open the CSV file picker
-  if (fileInputRef.current) {
-    fileInputRef.current.click();
-  }
-};
+  const handleCSVImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const text = evt.target?.result as string;
+      const lines = text.split('\n');
+      const newRows: PayrollRow[] = [];
+      let headerIndex = -1;
+      
+      // Find header
+      for (let i = 0; i < Math.min(lines.length, 20); i++) {
+        if (lines[i].includes("Last Name") && lines[i].includes("Start Date")) {
+          headerIndex = i;
+          break;
+        }
+      }
 
-// 3. In the Render area (Top Toolbar), update the button:
-<button 
-  onClick={handleNewRun}
-  className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
->
-  <FilePlus size={16} /> New Run (Import CSV)
-</button>
+      if (headerIndex === -1) {
+        alert("Could not find valid header row. Ensure CSV has 'Last Name', 'Start Date', etc.");
+        return;
+      }
 
-// 4. Ensure the hidden input is rendered somewhere in PayrollPage or Editor
-// Note: Currently the input is inside Editor.tsx. 
-// Ideally, move the handleCSVImport logic UP to PayrollPage.tsx so the "New Run" button can access it easily.
+      for (let i = headerIndex + 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+        const cols = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/); // Robust split
+        const cleanCols = cols.map(c => c.replace(/^"|"$/g, '').trim());
+        if (cleanCols.length < 10) continue;
+
+        // Map Columns (Adjust indices if your CSV changes)
+        const lastName = cleanCols[0];
+        const firstName = cleanCols[1];
+        const startDate = cleanCols[5];
+        const startTime = cleanCols[6];
+        const endDate = cleanCols[7];
+        const endTime = cleanCols[8];
+        const payCode = cleanCols[9];
+        const hours = parseFloat(cleanCols[10]);
+
+        if (payCode && !isNaN(hours)) {
+           const fullName = `${lastName}, ${firstName}`;
+           const row = calculatePayRow(fullName, payCode, hours, employees, rates);
+           row.startDate = startDate;
+           row.startTime = startTime;
+           row.endDate = endDate;
+           row.endTime = endTime;
+           newRows.push(row);
+        }
+      }
+      
+      if (newRows.length > 0) {
+        setData(newRows);
+      }
+    };
+    reader.readAsText(file);
+  };
+
   return (
     <div className="flex flex-col h-full gap-4">
       {/* Top Toolbar */}
@@ -92,13 +140,25 @@ const handleNewRun = () => {
          </div>
          
          <div className="flex items-center gap-2">
+            {/* Hidden Input for CSV Import */}
+            <input 
+              type="file" 
+              accept=".csv" 
+              ref={fileInputRef} 
+              className="hidden" 
+              onChange={handleCSVImport} 
+            />
+
             <button 
               onClick={handleNewRun}
               className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+              title="Clear table and import CSV"
             >
               <FilePlus size={16} /> New Run
             </button>
+            
             <div className="h-6 w-px bg-gray-200"></div>
+            
             <button 
               onClick={handleListFiles}
               className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
@@ -146,8 +206,8 @@ const handleNewRun = () => {
                         className="w-full text-left p-3 hover:bg-blue-50 rounded-lg border border-transparent hover:border-blue-100 group transition-all"
                       >
                         <div className="font-medium text-gray-800 group-hover:text-blue-700">{f.name}</div>
-                        <div className="text-xs text-gray-400 flex justify-between mt-1">
-                          <span>{new Date(f.createdTime || '').toLocaleString()}</span>
+                        <div className="text-xs text-gray-400 mt-1">
+                          {f.createdTime ? new Date(f.createdTime).toLocaleString() : 'Unknown Date'}
                         </div>
                       </button>
                     ))}
