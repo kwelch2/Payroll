@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { PayrollRow, MasterRates } from '../types';
 import { 
   X, Printer, CheckSquare, Square, Filter, 
-  ArrowUpDown, Calendar, Search, ChevronDown, ChevronRight 
+  ArrowUpDown, Search, ChevronDown, ChevronUp
 } from 'lucide-react';
 
 interface PrintWizardProps {
@@ -21,45 +21,59 @@ export default function PrintWizard({ data, onClose, rates }: PrintWizardProps) 
   const [search, setSearch] = useState("");
   const [sortField, setSortField] = useState<SortField>('payLevel');
   const [sortAsc, setSortAsc] = useState(true);
-  const [filterLevel, setFilterLevel] = useState<string>("all");
-  const [filterCode, setFilterCode] = useState<string>("all");
   
+  // Multi-Select States
+  const [selectedLevels, setSelectedLevels] = useState<Set<string>>(new Set());
+  const [selectedCodes, setSelectedCodes] = useState<Set<string>>(new Set());
+  
+  // UI Toggles for Filters
+  const [showLevelFilter, setShowLevelFilter] = useState(false);
+  const [showCodeFilter, setShowCodeFilter] = useState(false);
+
   // Custom Selection Set
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set(data.map(d => d.id)));
 
   const handlePrint = () => window.print();
 
+  // --- HELPER: Get Color ---
+  const getCodeColor = (code: string) => {
+    const def = rates.pay_codes.definitions.find(d => d.label === code || d.code === code);
+    return def?.color || '#e2e8f0'; // Default gray
+  };
+
   // --- DATA PROCESSING ENGINE ---
   const processedData = useMemo(() => {
     let result = [...data];
 
-    // 1. Filter
+    // 1. Search Text
     if (search) {
       const lower = search.toLowerCase();
       result = result.filter(r => r.name.toLowerCase().includes(lower));
     }
-    if (filterLevel !== 'all') {
-      result = result.filter(r => r.payLevel === filterLevel);
+
+    // 2. Filter by Level (Multi-select)
+    if (selectedLevels.size > 0) {
+      result = result.filter(r => selectedLevels.has(r.payLevel));
     }
-    if (filterCode !== 'all') {
-      result = result.filter(r => r.code === filterCode);
+
+    // 3. Filter by Pay Code (Multi-select)
+    if (selectedCodes.size > 0) {
+      result = result.filter(r => selectedCodes.has(r.code));
     }
     
-    // 2. Custom Selection Filter (Only applies in Custom Mode)
+    // 4. Custom Selection Filter (Only applies in Custom Mode)
     if (viewMode === 'custom') {
       result = result.filter(r => selectedIds.has(r.id));
     }
 
-    // 3. Sort
+    // 5. Sort
     result.sort((a, b) => {
       let cmp = 0;
       if (sortField === 'name') cmp = a.name.localeCompare(b.name);
       if (sortField === 'payLevel') {
-        // Try to sort by Rank ID if possible, else string
         const rankA = rates.pay_levels[a.payLevel]?.rank || 99;
         const rankB = rates.pay_levels[b.payLevel]?.rank || 99;
         cmp = rankA - rankB || a.payLevel.localeCompare(b.payLevel);
-        // Secondary sort by name
         if (cmp === 0) cmp = a.name.localeCompare(b.name);
       }
       if (sortField === 'date') {
@@ -71,14 +85,14 @@ export default function PrintWizard({ data, onClose, rates }: PrintWizardProps) 
     });
 
     return result;
-  }, [data, search, filterLevel, filterCode, sortField, sortAsc, viewMode, selectedIds, rates]);
+  }, [data, search, selectedLevels, selectedCodes, sortField, sortAsc, viewMode, selectedIds, rates]);
 
   // --- AGGREGATION FOR SUMMARY VIEW ---
   const summaryData = useMemo(() => {
     const groups = new Map<string, {
       name: string,
       payLevel: string,
-      codes: Map<string, { label: string, hours: number, total: number }>,
+      codes: Map<string, { label: string, hours: number, total: number, color: string }>,
       grandTotal: number,
       totalHours: number
     }>();
@@ -96,8 +110,8 @@ export default function PrintWizard({ data, onClose, rates }: PrintWizardProps) 
       
       const emp = groups.get(row.name)!;
       
-      // Calculate Effective Total (Handle Overrides)
       let pay = row.total || 0;
+      // Handle overrides
       if (row.manual_rate_override !== undefined && row.manual_rate_override !== null) {
          const def = rates.pay_codes.definitions.find(d => d.label === row.code);
          const isFlat = def?.type === 'flat';
@@ -108,7 +122,12 @@ export default function PrintWizard({ data, onClose, rates }: PrintWizardProps) 
       emp.totalHours += row.hours;
 
       if (!emp.codes.has(row.code)) {
-        emp.codes.set(row.code, { label: row.code, hours: 0, total: 0 });
+        emp.codes.set(row.code, { 
+            label: row.code, 
+            hours: 0, 
+            total: 0,
+            color: getCodeColor(row.code) 
+        });
       }
       const codeStats = emp.codes.get(row.code)!;
       codeStats.hours += row.hours;
@@ -119,6 +138,55 @@ export default function PrintWizard({ data, onClose, rates }: PrintWizardProps) 
   }, [processedData, rates]);
 
   // --- RENDERERS ---
+
+  const MultiSelectFilter = ({ 
+    title, 
+    options, 
+    selectedSet, 
+    setFunction, 
+    isOpen, 
+    toggleOpen 
+  }: any) => {
+    const toggleItem = (val: string) => {
+      const newSet = new Set(selectedSet);
+      if (newSet.has(val)) newSet.delete(val);
+      else newSet.add(val);
+      setFunction(newSet);
+    };
+
+    return (
+      <div className="border border-gray-300 rounded-lg bg-white overflow-hidden">
+        <button 
+          onClick={toggleOpen}
+          className="w-full flex justify-between items-center p-2 text-xs font-bold text-gray-700 bg-gray-50 hover:bg-gray-100"
+        >
+          <span>{title} {selectedSet.size > 0 && <span className="text-blue-600">({selectedSet.size})</span>}</span>
+          {isOpen ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
+        </button>
+        
+        {isOpen && (
+          <div className="max-h-40 overflow-y-auto p-2 space-y-1 bg-white">
+            <button 
+               onClick={() => setFunction(new Set())}
+               className={`w-full text-left px-2 py-1 text-[10px] rounded hover:bg-gray-50 ${selectedSet.size === 0 ? 'font-bold text-blue-600 bg-blue-50' : 'text-gray-500'}`}
+            >
+              All {title}s
+            </button>
+            {options.map((opt: string) => (
+              <button 
+                key={opt}
+                onClick={() => toggleItem(opt)}
+                className="w-full flex items-center gap-2 px-2 py-1 hover:bg-gray-50 rounded text-xs text-left"
+              >
+                {selectedSet.has(opt) ? <CheckSquare size={14} className="text-blue-600"/> : <Square size={14} className="text-gray-300"/>}
+                <span className={selectedSet.has(opt) ? 'text-gray-900 font-medium' : 'text-gray-600'}>{opt}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const SummaryView = () => (
     <div className="space-y-6">
@@ -145,13 +213,20 @@ export default function PrintWizard({ data, onClose, rates }: PrintWizardProps) 
             <table className="w-full text-xs">
                <tbody>
                  {Array.from(emp.codes.values()).map((code) => (
-                   <tr key={code.label} className="border-b border-gray-100 last:border-0">
-                     <td className="pl-4 py-1 text-gray-600 w-1/2">{code.label}</td>
-                     <td className="py-1 text-right w-1/4">{code.hours.toFixed(2)} {code.label.includes('flat') ? 'qty' : 'hrs'}</td>
+                   <tr 
+                     key={code.label} 
+                     className="border-b border-gray-100 last:border-0 print-color-exact"
+                     style={{ backgroundColor: `${code.color}20` }} // 20 = ~12% opacity hex
+                   >
+                     <td className="pl-4 py-1 text-gray-900 font-medium w-1/2 flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full" style={{ backgroundColor: code.color }}></div>
+                        {code.label}
+                     </td>
+                     <td className="py-1 text-right w-1/4">{code.hours.toFixed(2)} {code.label.toLowerCase().includes('flat') ? 'qty' : 'hrs'}</td>
                      <td className="pr-2 py-1 text-right w-1/4 font-medium text-gray-800">${code.total.toFixed(2)}</td>
                    </tr>
                  ))}
-                 <tr className="bg-gray-50 font-bold">
+                 <tr className="bg-white font-bold">
                     <td className="pl-4 py-1 text-gray-900">Total</td>
                     <td className="py-1 text-right">{emp.totalHours.toFixed(2)} hrs</td>
                     <td className="pr-2 py-1 text-right">${emp.grandTotal.toFixed(2)}</td>
@@ -193,14 +268,22 @@ export default function PrintWizard({ data, onClose, rates }: PrintWizardProps) 
              const pay = row.manual_rate_override !== undefined && row.manual_rate_override !== null
                ? row.manual_rate_override * (rates.pay_codes.definitions.find(d => d.label === row.code)?.type === 'flat' ? 1 : row.hours)
                : (row.total || 0);
+             
+             const color = getCodeColor(row.code);
 
              return (
-               <tr key={i} className="border-b border-gray-200 even:bg-gray-50/50 break-inside-avoid">
+               <tr 
+                 key={i} 
+                 className="border-b border-gray-200 break-inside-avoid print-color-exact"
+                 style={{ backgroundColor: `${color}25` }} // Row color
+               >
                  <td className="py-1 px-1 font-medium whitespace-nowrap">
                     {row.name}
-                    <div className="text-[9px] text-gray-400">{row.payLevel}</div>
+                    <div className="text-[9px] text-gray-500 opacity-70">{row.payLevel}</div>
                  </td>
-                 <td className="py-1 px-1">{row.code}</td>
+                 <td className="py-1 px-1 font-medium">
+                    <span style={{ color: '#000' }}>{row.code}</span>
+                 </td>
                  <td className="py-1 px-1 whitespace-nowrap">{row.startDate || '-'}</td>
                  <td className="py-1 px-1 whitespace-nowrap">{row.startTime ? `${row.startTime}-${row.endTime}` : '-'}</td>
                  <td className="py-1 px-1 text-right">{row.hours.toFixed(2)}</td>
@@ -327,20 +410,25 @@ export default function PrintWizard({ data, onClose, rates }: PrintWizardProps) 
                    </div>
                 </div>
 
-                {/* Filter Pay Level */}
-                <div>
-                   <label className="block text-[10px] text-gray-500 mb-1">Filter Level</label>
-                   <select 
-                     className="w-full text-sm border border-gray-300 rounded-lg p-2 bg-white"
-                     value={filterLevel}
-                     onChange={e => setFilterLevel(e.target.value)}
-                   >
-                     <option value="all">All Levels</option>
-                     <option value="Hourly Only">Hourly Only</option>
-                     <option value="User-Pay-Level">User-Pay-Level</option>
-                     {Object.keys(rates.pay_levels).map(l => <option key={l} value={l}>{l}</option>)}
-                   </select>
-                </div>
+                {/* Multi-Select Level Filter */}
+                <MultiSelectFilter 
+                   title="Pay Level" 
+                   options={Object.keys(rates.pay_levels)} 
+                   selectedSet={selectedLevels}
+                   setFunction={setSelectedLevels}
+                   isOpen={showLevelFilter}
+                   toggleOpen={() => { setShowLevelFilter(!showLevelFilter); setShowCodeFilter(false); }}
+                />
+
+                {/* Multi-Select Code Filter */}
+                <MultiSelectFilter 
+                   title="Pay Code" 
+                   options={rates.pay_codes.definitions.map(d => d.label)} 
+                   selectedSet={selectedCodes}
+                   setFunction={setSelectedCodes}
+                   isOpen={showCodeFilter}
+                   toggleOpen={() => { setShowCodeFilter(!showCodeFilter); setShowLevelFilter(false); }}
+                />
               </div>
 
               {/* 3. Custom Selector (Only visible in Custom Mode) */}
@@ -447,6 +535,16 @@ export default function PrintWizard({ data, onClose, rates }: PrintWizardProps) 
            </div>
         </div>
       </div>
+      
+      {/* Force Print Colors */}
+      <style>{`
+        @media print {
+          .print-color-exact {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+        }
+      `}</style>
     </div>
   );
 }
