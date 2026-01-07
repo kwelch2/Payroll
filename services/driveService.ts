@@ -7,42 +7,38 @@ const DISCOVERY_DOCS = ["https://www.googleapis.com/discovery/v1/apis/drive/v3/r
 const SCOPES = "https://www.googleapis.com/auth/drive.file";
 
 let tokenClient: any;
-// REMOVED: let gapiInited = false;
-// REMOVED: let gisInited = false;
 
-// Initialize GAPI (Client)
-export function initGapi() {
-  return new Promise<void>((resolve, reject) => {
-    window.gapi.load('client', async () => {
-      try {
-        await window.gapi.client.init({
-          apiKey: API_KEY,
-          discoveryDocs: DISCOVERY_DOCS,
-        });
-        resolve();
-      } catch (err) {
-        reject(err);
-      }
-    });
-  });
-}
-
-// Initialize GIS (Auth)
+// 1. Update initGis to check if the script loaded successfully
 export function initGis(onTokenCallback: (response: any) => void) {
-  return new Promise<void>((resolve) => {
-    tokenClient = window.google.accounts.oauth2.initTokenClient({
-      client_id: CLIENT_ID,
-      scope: SCOPES,
-      callback: (tokenResponse: any) => {
-        onTokenCallback(tokenResponse);
-      },
-    });
-    resolve();
+  return new Promise<void>((resolve, reject) => {
+    // Safety check: Ensure Google script loaded
+    if (typeof window.google === 'undefined' || !window.google.accounts) {
+      console.error("Google Identity Services script not loaded. Check network blockers.");
+      reject(new Error("Google Identity Services script failed to load."));
+      return;
+    }
+
+    try {
+      tokenClient = window.google.accounts.oauth2.initTokenClient({
+        client_id: CLIENT_ID,
+        scope: SCOPES,
+        callback: (tokenResponse: any) => {
+          onTokenCallback(tokenResponse);
+        },
+      });
+      resolve();
+    } catch (err) {
+      reject(err);
+    }
   });
 }
 
+// 2. Update requestAccessToken to alert instead of crashing
 export function requestAccessToken() {
-  if (!tokenClient) throw new Error("GIS not initialized");
+  if (!tokenClient) {
+    alert("Login service not ready. Please refresh or check your internet connection.");
+    throw new Error("GIS not initialized");
+  }
   tokenClient.requestAccessToken({ prompt: '' });
 }
 
