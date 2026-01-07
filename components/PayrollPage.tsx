@@ -19,7 +19,6 @@ export default function PayrollPage({ data, setData, employees, rates, systemIds
   const [isLoadingList, setIsLoadingList] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState("");
   
-  // Ref for the hidden file input
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // --- ACTIONS ---
@@ -56,19 +55,16 @@ export default function PayrollPage({ data, setData, employees, rates, systemIds
     }
   };
 
-  // Combined Action: Clear Data -> Open CSV Import
   const handleNewRun = () => {
     if(data.length > 0 && !confirm("Start a new run? Current rows will be cleared.")) return;
-    
     setData([]);
-    
-    // Automatically trigger the file picker
     if (fileInputRef.current) {
-      fileInputRef.current.value = ''; // Reset input so same file can be selected again
+      fileInputRef.current.value = ''; 
       fileInputRef.current.click();
     }
   };
 
+  // --- SMART CSV IMPORT ---
   const handleCSVImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -76,56 +72,98 @@ export default function PayrollPage({ data, setData, employees, rates, systemIds
     const reader = new FileReader();
     reader.onload = (evt) => {
       const text = evt.target?.result as string;
-      const lines = text.split('\n');
+      const lines = text.split('\n').filter(line => line.trim().length > 0);
       const newRows: PayrollRow[] = [];
-      let headerIndex = -1;
       
-      // Find header
+      // 1. Detect Header Row
+      let headerIndex = -1;
+      let headerRow: string[] = [];
+
       for (let i = 0; i < Math.min(lines.length, 20); i++) {
-        if (lines[i].includes("Last Name") && lines[i].includes("Start Date")) {
+        const row = lines[i].split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(c => c.replace(/^"|"$/g, '').trim());
+        // Look for key columns to identify header
+        if (
+            (row.includes("Last Name") && row.includes("Pay Code")) || 
+            (row.includes("Employee") && row.includes("Code"))
+        ) {
           headerIndex = i;
+          headerRow = row;
           break;
         }
       }
 
       if (headerIndex === -1) {
-        alert("Could not find valid header row. Ensure CSV has 'Last Name', 'Start Date', etc.");
+        alert("Could not detect CSV Headers. File must contain 'Last Name' (or 'Employee') and 'Pay Code'.");
         return;
       }
 
+      // 2. Map Columns Dynamically
+      const findCol = (patterns: string[]) => headerRow.findIndex(h => patterns.some(p => h.toLowerCase().includes(p.toLowerCase())));
+
+      const idxLast = findCol(["Last Name", "LastName", "Employee Name"]);
+      const idxFirst = findCol(["First Name", "FirstName"]); // Might be -1 if Name is combined
+      const idxCode = findCol(["Pay Code", "PayCode", "Code"]);
+      const idxHours = findCol(["Hours", "Qty", "Quantity", "Hrs"]);
+      
+      // Date/Time Mapping
+      const idxStartDate = findCol(["Start Date", "Date"]);
+      const idxStartTime = findCol(["Start Time", "Time"]);
+      const idxEndDate = findCol(["End Date"]);
+      const idxEndTime = findCol(["End Time"]);
+
+      // 3. Process Rows
       for (let i = headerIndex + 1; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (!line) continue;
-        const cols = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/); // Robust split
-        const cleanCols = cols.map(c => c.replace(/^"|"$/g, '').trim());
-        if (cleanCols.length < 10) continue;
+        const cols = lines[i].split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(c => c.replace(/^"|"$/g, '').trim());
+        
+        // Basic Validation
+        if (cols.length < 5) continue; 
 
-        // Map Columns (Adjust indices if your CSV changes)
-        const lastName = cleanCols[0];
-        const firstName = cleanCols[1];
-        const startDate = cleanCols[5];
-        const startTime = cleanCols[6];
-        const endDate = cleanCols[7];
-        const endTime = cleanCols[8];
-        const payCode = cleanCols[9];
-        const hours = parseFloat(cleanCols[10]);
+        // Name Logic
+        let lastName = idxLast > -1 ? cols[idxLast] : "Unknown";
+        let firstName = idxFirst > -1 ? cols[idxFirst] : "";
+        
+        // Handle "Last, First" in single column if needed
+        if (idxFirst === -1 && lastName.includes(',')) {
+            const parts = lastName.split(',');
+            lastName = parts[0].trim();
+            firstName = parts[1].trim();
+        }
 
-        if (payCode && !isNaN(hours)) {
+        const payCode = idxCode > -1 ? cols[idxCode] : "";
+        const hoursStr = idxHours > -1 ? cols[idxHours] : "0";
+        const hours = parseFloat(hoursStr);
+
+        // Date Extraction
+        const startDate = idxStartDate > -1 ? cols[idxStartDate] : "";
+        const startTime = idxStartTime > -1 ? cols[idxStartTime] : "";
+        const endDate = idxEndDate > -1 ? cols[idxEndDate] : "";
+        const endTime = idxEndTime > -1 ? cols[idxEndTime] : "";
+
+        if (payCode && (!isNaN(hours) || payCode)) {
            const fullName = `${lastName}, ${firstName}`;
-           const row = calculatePayRow(fullName, payCode, hours, employees, rates);
+           
+           // Calculate Rates
+           const row = calculatePayRow(fullName, payCode, hours || 0, employees, rates);
+           
+           // Attach Dates explicitly
            row.startDate = startDate;
            row.startTime = startTime;
            row.endDate = endDate;
            row.endTime = endTime;
+           
            newRows.push(row);
         }
       }
       
       if (newRows.length > 0) {
         setData(newRows);
+        alert(`Successfully imported ${newRows.length} rows.`);
+      } else {
+        alert("No valid rows found. Please check your CSV format.");
       }
     };
     reader.readAsText(file);
+    e.target.value = '';
   };
 
   return (
@@ -140,7 +178,6 @@ export default function PayrollPage({ data, setData, employees, rates, systemIds
          </div>
          
          <div className="flex items-center gap-2">
-            {/* Hidden Input for CSV Import */}
             <input 
               type="file" 
               accept=".csv" 
@@ -152,7 +189,7 @@ export default function PayrollPage({ data, setData, employees, rates, systemIds
             <button 
               onClick={handleNewRun}
               className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-              title="Clear table and import CSV"
+              title="Start fresh with a CSV import"
             >
               <FilePlus size={16} /> New Run
             </button>
