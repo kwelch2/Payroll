@@ -1,19 +1,20 @@
-// App.tsx
 import { useState, useEffect } from 'react';
 import Welcome from './components/Welcome';
 import Layout from './components/Layout';
 import PayrollPage from './components/PayrollPage'; 
 import Settings from './components/Settings';
 import Reports from './components/Reports';
-// ADD fetchSystemConfig to the imports below:
-import { initGapi, initGis, requestAccessToken, ensureSystemFolders, fetchSystemConfig, SystemIds } from './services/driveService';
+import { 
+  initGapi, initGis, requestAccessToken, 
+  initializeSystem, SystemIds 
+} from './services/driveService';
 import { MasterRates, Employee, PayrollRow, AppConfig } from './types';
 import { INITIAL_RATES, INITIAL_EMPLOYEES, INITIAL_CONFIG } from './constants';
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [gapiReady, setGapiReady] = useState(false);
-  const [authStatus, setAuthStatus] = useState("Initializing Secure Handshake...");
+  const [authStatus, setAuthStatus] = useState("Initializing...");
 
   const [activeTab, setActiveTab] = useState('payroll');
   const [systemIds, setSystemIds] = useState<SystemIds | null>(null);
@@ -23,7 +24,6 @@ export default function App() {
   const [config, setConfig] = useState<AppConfig>(INITIAL_CONFIG);
   const [payrollData, setPayrollData] = useState<PayrollRow[]>([]);
 
-  // Init Google on Mount
   useEffect(() => {
     const boot = async () => {
       try {
@@ -35,52 +35,43 @@ export default function App() {
           }
         });
         setGapiReady(true);
-        setAuthStatus("System Ready. Waiting for Auth.");
+        setAuthStatus("Ready to Connect.");
       } catch (err) {
         console.error(err);
-        setAuthStatus("Connection Failed. Check Internet.");
+        setAuthStatus("Connection Failed.");
       }
     };
     boot();
   }, []);
 
-  // Load System Data on Login
   useEffect(() => {
     if (isAuthenticated) {
-      loadSystem();
+      loadData();
     }
   }, [isAuthenticated]);
 
-  const loadSystem = async () => {
+  const loadData = async () => {
     try {
-      const ids = await ensureSystemFolders();
-      setSystemIds(ids);
-      console.log("System Folders Located:", ids);
-
-      // --- NEW: FETCH CONFIG DATA ---
-      const data = await fetchSystemConfig(ids.configId);
+      setAuthStatus("Loading System Data...");
       
-      if (data.rates) {
-        console.log("Rates Loaded");
-        setRates(data.rates);
-      }
-      if (data.employees) {
-        console.log("Personnel Loaded");
-        setEmployees(data.employees);
-      }
-      if (data.config) {
-        console.log("App Config Loaded");
-        setConfig(data.config);
-      }
-      // ------------------------------
-
+      // THIS IS THE KEY CHANGE:
+      // It initializes folders AND loads/creates the specific JSON files
+      const result = await initializeSystem();
+      
+      setSystemIds(result.ids);
+      
+      if (result.data.rates) setRates(result.data.rates);
+      if (result.data.employees) setEmployees(result.data.employees);
+      if (result.data.config) setConfig(result.data.config);
+      
+      setAuthStatus("Online");
     } catch (err) {
       console.error("System Load Error", err);
+      setAuthStatus("Error Loading Data");
     }
   };
 
   const handleLogin = () => requestAccessToken();
-  
   const handleLogout = () => {
     setIsAuthenticated(false);
     window.location.reload(); 

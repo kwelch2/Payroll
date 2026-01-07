@@ -1,39 +1,5 @@
 // types.ts
 
-export interface Employee {
-  id: string;
-  personal: {
-    full_name: string;
-    first_name: string;
-    last_name: string;
-  };
-  classifications: {
-    pay_level: string;
-    rank: string;
-    // Add these if missing based on your data
-    ems_cert?: string;
-    fire_status?: string;
-    start_date_ems?: string;
-    start_date_fire?: string;
-  };
-  contact?: {
-    phone: string;
-    email: string;
-    carrier: string;
-  };
-  payroll_config: {
-    use_user_pay_scale: boolean;
-    custom_rates: Record<string, number>;
-  };
-  status: string;
-  leave_bank?: {
-    group: string;
-    current_balance: number;
-  };
-  // Allow for loose typing if data structure varies
-  address?: any; 
-}
-
 export interface PayCodeDefinition {
   code: string;
   label: string;
@@ -60,8 +26,57 @@ export interface MasterRates {
   pay_levels: Record<string, {
     rank: number;
     rates: Record<string, number>;
+    pto_group?: string; // Added to match your data
   }>;
   pto_rules?: Record<string, PTORule>;
+}
+
+export interface Employee {
+  id: string;
+  employee_id?: string; // Added
+  personal: {
+    full_name: string;
+    first_name: string;
+    last_name: string;
+  };
+  address?: {
+    line1: string;
+    line2: string;
+    city: string;
+    state: string;
+    zip: string;
+  };
+  classifications: {
+    pay_level: string;
+    rank: string;
+    officer_rank?: string;
+    fire_status?: string;
+    ems_cert?: string;
+    start_date_ems?: string;
+    start_date_fire?: string;
+  };
+  contact?: {
+    phone: string;
+    email: string;
+    carrier: string;
+  };
+  payroll_config: {
+    use_user_pay_scale: boolean;
+    custom_rates: Record<string, number>;
+  };
+  status: string;
+  leave_bank?: {
+    group: string;
+    current_balance: number;
+    history?: any[];
+  };
+}
+
+export interface AppConfig {
+  ranks: string[];
+  ems_cert_levels: string[];
+  fire_statuses: string[];
+  carriers: string[];
 }
 
 export interface PayrollRow {
@@ -80,12 +95,4 @@ export interface PayrollRow {
   startTime?: string;
   endDate?: string;
   endTime?: string;
-}
-
-// --- THIS WAS MISSING ---
-export interface AppConfig {
-  ranks: string[];
-  ems_cert_levels: string[];
-  fire_statuses: string[];
-  carriers: string[];
 }
