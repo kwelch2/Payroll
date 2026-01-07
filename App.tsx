@@ -19,6 +19,13 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('payroll');
   const [systemIds, setSystemIds] = useState<SystemIds | null>(null);
 
+  // --- NEW: Track individual file loading status ---
+  const [systemStatus, setSystemStatus] = useState({
+    rates: false,
+    employees: false,
+    config: false
+  });
+
   const [rates, setRates] = useState<MasterRates>(INITIAL_RATES);
   const [employees, setEmployees] = useState<Employee[]>(INITIAL_EMPLOYEES);
   const [config, setConfig] = useState<AppConfig>(INITIAL_CONFIG);
@@ -28,14 +35,14 @@ export default function App() {
     const boot = async () => {
       try {
         await initGapi();
-        await initGis((token) => {
+        await initGis((token: any) => {
           if (token && token.access_token) {
             setIsAuthenticated(true);
             setAuthStatus("Authorized.");
           }
         });
         setGapiReady(true);
-        setAuthStatus("Ready to Connect.");
+        setAuthStatus("Ready.");
       } catch (err) {
         console.error(err);
         setAuthStatus("Connection Failed.");
@@ -46,23 +53,30 @@ export default function App() {
 
   useEffect(() => {
     if (isAuthenticated) {
-      loadData();
+      loadSystem();
     }
   }, [isAuthenticated]);
 
-  const loadData = async () => {
+  const loadSystem = async () => {
     try {
       setAuthStatus("Loading System Data...");
       
-      // THIS IS THE KEY CHANGE:
-      // It initializes folders AND loads/creates the specific JSON files
       const result = await initializeSystem();
-      
       setSystemIds(result.ids);
       
-      if (result.data.rates) setRates(result.data.rates);
-      if (result.data.employees) setEmployees(result.data.employees);
-      if (result.data.config) setConfig(result.data.config);
+      // Update data and track status individually
+      if (result.data.rates) {
+        setRates(result.data.rates);
+        setSystemStatus(prev => ({ ...prev, rates: true }));
+      }
+      if (result.data.employees) {
+        setEmployees(result.data.employees);
+        setSystemStatus(prev => ({ ...prev, employees: true }));
+      }
+      if (result.data.config) {
+        setConfig(result.data.config);
+        setSystemStatus(prev => ({ ...prev, config: true }));
+      }
       
       setAuthStatus("Online");
     } catch (err) {
@@ -87,6 +101,7 @@ export default function App() {
       onTabChange={setActiveTab} 
       userEmail="Admin User" 
       onLogout={handleLogout}
+      systemStatus={systemStatus} // <--- PASSING STATUS HERE
     >
       {activeTab === 'payroll' && (
         <PayrollPage 

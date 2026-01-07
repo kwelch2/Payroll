@@ -54,7 +54,32 @@ export default function PayrollPage({ data, setData, employees, rates, systemIds
     if(data.length > 0 && !confirm("Start a new run? Current rows will be cleared.")) return;
     setData([]);
   };
+  // 1. Add a ref to the hidden file input
+const fileInputRef = React.useRef<HTMLInputElement>(null);
 
+// 2. Update handleNewRun to click that input
+const handleNewRun = () => {
+  if (data.length > 0 && !confirm("Start a new run? This will clear current data.")) return;
+  
+  setData([]); // Clear data
+  
+  // Automatically open the CSV file picker
+  if (fileInputRef.current) {
+    fileInputRef.current.click();
+  }
+};
+
+// 3. In the Render area (Top Toolbar), update the button:
+<button 
+  onClick={handleNewRun}
+  className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+>
+  <FilePlus size={16} /> New Run (Import CSV)
+</button>
+
+// 4. Ensure the hidden input is rendered somewhere in PayrollPage or Editor
+// Note: Currently the input is inside Editor.tsx. 
+// Ideally, move the handleCSVImport logic UP to PayrollPage.tsx so the "New Run" button can access it easily.
   return (
     <div className="flex flex-col h-full gap-4">
       {/* Top Toolbar */}
