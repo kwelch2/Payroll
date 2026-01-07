@@ -1,11 +1,11 @@
 import React, { useState, useMemo } from 'react';
 import { PayrollRow, Employee, MasterRates } from '../types';
 import { calculatePayRow, getRowColor } from '../services/payrollService';
-import { saveJsonFile, SystemIds } from '../services/driveService'; // PATCH 1: Removed ensureSystemFolders, added SystemIds
+import { saveJsonFile, SystemIds } from '../services/driveService';
 import { 
   Edit2, Printer, RefreshCw, FileUp, 
   AlertTriangle, UploadCloud, ChevronRight, 
-  Filter, Clock, DollarSign, Calendar 
+  Filter, Clock, DollarSign, Calendar, Hash 
 } from 'lucide-react';
 import RowModal from './RowModal';
 import PrintWizard from './PrintWizard';
@@ -15,7 +15,7 @@ interface EditorProps {
   setData: (data: PayrollRow[]) => void;
   employees: Employee[];
   rates: MasterRates;
-  systemIds: SystemIds | null; // PATCH 2: Added this prop to receive connection data
+  systemIds: SystemIds | null;
 }
 
 type ViewMode = 'summary' | 'detail';
@@ -26,20 +26,17 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
   const [showPrintWizard, setShowPrintWizard] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   
-  // New State for View/Filter
+  // Filter States
   const [viewMode, setViewMode] = useState<ViewMode>('summary');
   const [filterMode, setFilterMode] = useState<FilterMode>('all');
   
-  // LOGIC: Default to Open (track collapsed state)
+  // Accordion States
   const [collapsedEmp, setCollapsedEmp] = useState<Set<string>>(new Set());
-  
-  // Drill-down details (Level 3) default to Closed
   const [expandedCode, setExpandedCode] = useState<Set<string>>(new Set());
 
   // --- Helpers ---
 
   const getEffectiveTotal = (row: PayrollRow) => {
-    // If we have a manual override, use it
     if (row.manual_rate_override !== undefined && row.manual_rate_override !== null) {
        const def = rates.pay_codes.definitions.find(d => d.label === row.code);
        const isFlat = def?.type === 'flat';
@@ -57,10 +54,10 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
       return {
         grandTotal: acc.grandTotal + total,
         totalHours: acc.totalHours + row.hours,
-        standbyHours: acc.standbyHours + (isStandby ? row.hours : 0),
+        standbyQty: acc.standbyQty + (isStandby ? row.hours : 0), // row.hours acts as Qty for flat rates
         flagged: acc.flagged + (row.alert ? 1 : 0)
       };
-    }, { grandTotal: 0, totalHours: 0, standbyHours: 0, flagged: 0 });
+    }, { grandTotal: 0, totalHours: 0, standbyQty: 0, flagged: 0 });
   }, [data, rates]);
 
   // --- Filtering ---
@@ -72,7 +69,7 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
     });
   }, [data, filterMode]);
 
-  // --- Grouping for Summary View ---
+  // --- Grouping ---
   const groupedData = useMemo(() => {
     const groups: Record<string, { 
       name: string, 
@@ -142,7 +139,6 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
   const handleRefreshDraft = () => {
     const refreshed = data.map(r => {
       const calc = calculatePayRow(r.name, r.code, r.hours, employees, rates);
-      // Preserve manual edits and Dates
       calc.manual_rate_override = r.manual_rate_override;
       calc.manual_note = r.manual_note;
       calc.id = r.id;
@@ -156,11 +152,10 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
     alert('Draft refreshed with latest rates/staff settings.');
   };
 
-  // PATCH 3: Updated Save function to use the passed systemIds prop
   const handleSaveToDrive = async () => {
     if (data.length === 0) return;
     if (!systemIds) {
-        alert("System connection lost. Please refresh the page to reconnect.");
+        alert("System connection lost. Please refresh.");
         return;
     }
 
@@ -181,7 +176,6 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
 
     try {
       setIsSaving(true);
-      // Use the ID from the prop instead of finding it again
       await saveJsonFile(filename, { meta: { date: dateStr, stats }, rows: data }, systemIds.currentYearId);
       alert(`Successfully saved to Drive as: ${filename}`);
     } catch (err) {
@@ -201,9 +195,8 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
       const text = evt.target?.result as string;
       const lines = text.split('\n');
       const newRows: PayrollRow[] = [];
-      
       let headerIndex = -1;
-      // Look for the header row containing specific columns
+      
       for (let i = 0; i < Math.min(lines.length, 20); i++) {
         if (lines[i].includes("Last Name") && lines[i].includes("Start Date")) {
           headerIndex = i;
@@ -219,36 +212,26 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
       for (let i = headerIndex + 1; i < lines.length; i++) {
         const line = lines[i].trim();
         if (!line) continue;
-        
-        // Robust CSV Split (Handles quotes containing commas)
         const cols = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
         const cleanCols = cols.map(c => c.replace(/^"|"$/g, '').trim());
-        
-        // Skip empty or summary lines
         if (cleanCols.length < 10) continue;
 
-        // MAPPING BASED ON YOUR CSV STRUCTURE
         const lastName = cleanCols[0];
         const firstName = cleanCols[1];
-        
-        const startDate = cleanCols[5];  // "12/06/2025"
-        const startTime = cleanCols[6];  // "18:00"
-        const endDate = cleanCols[7];    // "12/07/2025"
-        const endTime = cleanCols[8];    // "06:00"
-        
+        const startDate = cleanCols[5];
+        const startTime = cleanCols[6];
+        const endDate = cleanCols[7];
+        const endTime = cleanCols[8];
         const payCode = cleanCols[9];
         const hours = parseFloat(cleanCols[10]);
 
         if (payCode && !isNaN(hours)) {
            const fullName = `${lastName}, ${firstName}`;
            const row = calculatePayRow(fullName, payCode, hours, employees, rates);
-           
-           // Apply the parsed dates to the row object
            row.startDate = startDate;
            row.startTime = startTime;
            row.endDate = endDate;
            row.endTime = endTime;
-           
            newRows.push(row);
         }
       }
@@ -265,31 +248,49 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
   return (
     <div className="space-y-6 pb-20">
       
-      {/* --- TOP STATS BAR --- */}
+      {/* --- TOP STATS BAR (Interactive) --- */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {/* Gross Pay */}
         <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col">
           <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2">
             <DollarSign size={14} /> Gross Pay
           </span>
           <span className="text-2xl font-bold text-gray-900 mt-1">${stats.grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
         </div>
+
+        {/* Total Hours */}
         <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col">
           <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2">
             <Clock size={14} /> Total Hours
           </span>
           <span className="text-2xl font-bold text-gray-900 mt-1">{stats.totalHours.toFixed(2)}</span>
         </div>
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col">
-          <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2">
-            <Calendar size={14} /> Standby Hours
+
+        {/* Standby Qty (Clickable) */}
+        <div 
+          onClick={() => setFilterMode(filterMode === 'standby' ? 'all' : 'standby')}
+          className={`p-4 rounded-xl shadow-sm border cursor-pointer transition-all hover:shadow-md active:scale-95 flex flex-col
+            ${filterMode === 'standby' ? 'bg-blue-50 border-blue-400 ring-2 ring-blue-100' : 'bg-white border-gray-200 hover:bg-blue-50/50'}`}
+        >
+          <span className={`text-xs font-bold uppercase tracking-wider flex items-center gap-2 ${filterMode === 'standby' ? 'text-blue-700' : 'text-gray-400'}`}>
+            <Hash size={14} /> Standby Qty
           </span>
-          <span className="text-2xl font-bold text-blue-600 mt-1">{stats.standbyHours.toFixed(2)}</span>
+          <span className={`text-2xl font-bold mt-1 ${filterMode === 'standby' ? 'text-blue-800' : 'text-blue-600'}`}>{stats.standbyQty.toFixed(0)}</span>
+          {filterMode === 'standby' && <div className="text-[10px] text-blue-600 font-medium mt-1">Filtering Active</div>}
         </div>
-        <div className={`p-4 rounded-xl shadow-sm border flex flex-col ${stats.flagged > 0 ? 'bg-red-50 border-red-200' : 'bg-white border-gray-200'}`}>
-          <span className={`text-xs font-bold uppercase tracking-wider flex items-center gap-2 ${stats.flagged > 0 ? 'text-red-600' : 'text-gray-400'}`}>
+
+        {/* Flags/Errors (Clickable) */}
+        <div 
+          onClick={() => setFilterMode(filterMode === 'flagged' ? 'all' : 'flagged')}
+          className={`p-4 rounded-xl shadow-sm border cursor-pointer transition-all hover:shadow-md active:scale-95 flex flex-col
+            ${filterMode === 'flagged' ? 'bg-red-50 border-red-400 ring-2 ring-red-100' : 'bg-white border-gray-200 hover:bg-red-50/50'}
+            ${stats.flagged > 0 ? 'border-gray-200' : 'opacity-70'}`}
+        >
+          <span className={`text-xs font-bold uppercase tracking-wider flex items-center gap-2 ${filterMode === 'flagged' || stats.flagged > 0 ? 'text-red-600' : 'text-gray-400'}`}>
             <AlertTriangle size={14} /> Flags / Errors
           </span>
-          <span className={`text-2xl font-bold mt-1 ${stats.flagged > 0 ? 'text-red-700' : 'text-gray-900'}`}>{stats.flagged}</span>
+          <span className={`text-2xl font-bold mt-1 ${filterMode === 'flagged' || stats.flagged > 0 ? 'text-red-700' : 'text-gray-900'}`}>{stats.flagged}</span>
+          {filterMode === 'flagged' && <div className="text-[10px] text-red-600 font-medium mt-1">Filtering Active</div>}
         </div>
       </div>
 
@@ -317,7 +318,8 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
            <div className="relative">
              <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
              <select 
-               className="pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none appearance-none cursor-pointer"
+               className={`pl-10 pr-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none appearance-none cursor-pointer font-medium
+                 ${filterMode !== 'all' ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-gray-50 border-gray-200'}`}
                value={filterMode}
                onChange={(e) => setFilterMode(e.target.value as FilterMode)}
              >
@@ -386,10 +388,9 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
                          const codeId = `${emp.name}-${code}`;
                          const isCodeExpanded = expandedCode.has(codeId);
                          
-                         // Determine Definition and Colors
                          const def = rates.pay_codes.definitions.find(d => d.label === code);
                          const baseColor = def ? def.color : '#e2e8f0';
-                         const headerBg = `${baseColor}25`; // ~15% opacity
+                         const headerBg = `${baseColor}25`;
                          const isFlatRate = def?.type === 'flat';
 
                          return (
@@ -407,8 +408,8 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
                                   <span className="font-bold text-gray-800">{code}</span>
                                   <span className="text-xs text-gray-600 opacity-70 ml-2">
                                     {isFlatRate 
-                                      ? `(${stats.totalHours.toFixed(2)} hrs total)` 
-                                      : `(${stats.rows.length} entries)`}
+                                      ? `(${stats.totalHours.toFixed(2)} qty)` 
+                                      : `(${stats.totalHours.toFixed(2)} hrs)`}
                                   </span>
                                </div>
 
@@ -552,6 +553,7 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
           onSave={handleUpdateRow} 
           onDelete={handleDeleteRow}
           rates={rates}
+          employees={employees} // Updated to pass employees
         />
       )}
 

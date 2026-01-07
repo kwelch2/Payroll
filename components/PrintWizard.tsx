@@ -216,7 +216,7 @@ export default function PrintWizard({ data, onClose, rates }: PrintWizardProps) 
                    <tr 
                      key={code.label} 
                      className="border-b border-gray-100 last:border-0 print-color-exact"
-                     style={{ backgroundColor: `${code.color}20` }} // 20 = ~12% opacity hex
+                     style={{ backgroundColor: `${code.color}20` }} 
                    >
                      <td className="pl-4 py-1 text-gray-900 font-medium w-1/2 flex items-center gap-2">
                         <div className="w-2 h-2 rounded-full" style={{ backgroundColor: code.color }}></div>
@@ -275,7 +275,7 @@ export default function PrintWizard({ data, onClose, rates }: PrintWizardProps) 
                <tr 
                  key={i} 
                  className="border-b border-gray-200 break-inside-avoid print-color-exact"
-                 style={{ backgroundColor: `${color}25` }} // Row color
+                 style={{ backgroundColor: `${color}25` }} 
                >
                  <td className="py-1 px-1 font-medium whitespace-nowrap">
                     {row.name}
@@ -339,27 +339,18 @@ export default function PrintWizard({ data, onClose, rates }: PrintWizardProps) 
                      onClick={() => setViewMode('summary')}
                      className={`flex items-center gap-3 p-3 rounded-lg border text-sm font-medium transition-all ${viewMode === 'summary' ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-sm' : 'bg-white border-gray-200 text-gray-600 hover:border-blue-300'}`}
                    >
-                     <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${viewMode === 'summary' ? 'border-blue-600 bg-blue-600' : 'border-gray-400'}`}>
-                        {viewMode === 'summary' && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
-                     </div>
                      Summary by Employee
                    </button>
                    <button 
                      onClick={() => setViewMode('detail')}
                      className={`flex items-center gap-3 p-3 rounded-lg border text-sm font-medium transition-all ${viewMode === 'detail' ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-sm' : 'bg-white border-gray-200 text-gray-600 hover:border-blue-300'}`}
                    >
-                     <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${viewMode === 'detail' ? 'border-blue-600 bg-blue-600' : 'border-gray-400'}`}>
-                        {viewMode === 'detail' && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
-                     </div>
                      Full Detailed Audit
                    </button>
                    <button 
                      onClick={() => setViewMode('custom')}
                      className={`flex items-center gap-3 p-3 rounded-lg border text-sm font-medium transition-all ${viewMode === 'custom' ? 'bg-blue-50 border-blue-500 text-blue-700 shadow-sm' : 'bg-white border-gray-200 text-gray-600 hover:border-blue-300'}`}
                    >
-                     <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${viewMode === 'custom' ? 'border-blue-600 bg-blue-600' : 'border-gray-400'}`}>
-                        {viewMode === 'custom' && <div className="w-1.5 h-1.5 bg-white rounded-full" />}
-                     </div>
                      Custom Selection
                    </button>
                 </div>
@@ -393,8 +384,8 @@ export default function PrintWizard({ data, onClose, rates }: PrintWizardProps) 
                        value={sortField}
                        onChange={(e) => setSortField(e.target.value as SortField)}
                      >
-                       <option value="payLevel">Pay Level (Rank)</option>
-                       <option value="name">Name (A-Z)</option>
+                       <option value="payLevel">Pay Level</option>
+                       <option value="name">Name</option>
                        <option value="date">Date</option>
                      </select>
                    </div>
@@ -404,16 +395,17 @@ export default function PrintWizard({ data, onClose, rates }: PrintWizardProps) 
                        onClick={() => setSortAsc(!sortAsc)}
                        className="w-full text-sm border border-gray-300 rounded-lg p-2 bg-white flex items-center justify-between hover:bg-gray-50"
                      >
-                       {sortAsc ? 'Ascending' : 'Descending'}
+                       {sortAsc ? 'Asc' : 'Desc'}
                        <ArrowUpDown size={14} className="text-gray-400" />
                      </button>
                    </div>
                 </div>
 
-                {/* Multi-Select Level Filter */}
+                {/* Multi-Select Level Filter - WITH USER-PAY-LEVEL */}
                 <MultiSelectFilter 
                    title="Pay Level" 
-                   options={Object.keys(rates.pay_levels)} 
+                   // FIX: Added 'User-Pay-Level' and 'Hourly Only' explicitly
+                   options={Array.from(new Set([...Object.keys(rates.pay_levels), 'User-Pay-Level', 'Hourly Only'])).sort()} 
                    selectedSet={selectedLevels}
                    setFunction={setSelectedLevels}
                    isOpen={showLevelFilter}
