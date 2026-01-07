@@ -1,5 +1,13 @@
 // services/driveService.ts
 
+// 1. Fix Types: Tell TypeScript these exist on the window object
+declare global {
+  interface Window {
+    gapi: any;
+    google: any;
+  }
+}
+
 const API_KEY = import.meta.env.VITE_GOOGLE_API_KEY;
 const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 
@@ -8,10 +16,33 @@ const SCOPES = "https://www.googleapis.com/auth/drive.file";
 
 let tokenClient: any;
 
-// 1. Update initGis to check if the script loaded successfully
+// 2. Fix Unused Variables: Restore the GAPI initialization function
+export function initGapi() {
+  return new Promise<void>((resolve, reject) => {
+    // Safety check: Ensure gapi is loaded
+    if (typeof window.gapi === 'undefined') {
+      console.error("GAPI script not loaded.");
+      reject(new Error("Google API script failed to load."));
+      return;
+    }
+
+    window.gapi.load('client', async () => {
+      try {
+        await window.gapi.client.init({
+          apiKey: API_KEY,
+          discoveryDocs: DISCOVERY_DOCS,
+        });
+        resolve();
+      } catch (err) {
+        reject(err);
+      }
+    });
+  });
+}
+
 export function initGis(onTokenCallback: (response: any) => void) {
   return new Promise<void>((resolve, reject) => {
-    // Safety check: Ensure Google script loaded
+    // Safety check: Ensure Google Identity script is loaded
     if (typeof window.google === 'undefined' || !window.google.accounts) {
       console.error("Google Identity Services script not loaded. Check network blockers.");
       reject(new Error("Google Identity Services script failed to load."));
@@ -33,7 +64,6 @@ export function initGis(onTokenCallback: (response: any) => void) {
   });
 }
 
-// 2. Update requestAccessToken to alert instead of crashing
 export function requestAccessToken() {
   if (!tokenClient) {
     alert("Login service not ready. Please refresh or check your internet connection.");
@@ -73,6 +103,9 @@ async function findFile(name: string, mimeType: string, parentId?: string): Prom
     query += ` and '${parentId}' in parents`;
   }
   
+  // Ensure gapi client is initialized before calling
+  if (!window.gapi.client) throw new Error("GAPI Client not initialized");
+
   const response = await window.gapi.client.drive.files.list({
     q: query,
     fields: 'files(id, name)',
@@ -112,7 +145,15 @@ export async function saveJsonFile(filename: string, content: any, parentId: str
     parents: [parentId],
   };
 
-  const accessToken = window.gapi.client.getToken().access_token;
+  // Grab the token from the client object if available
+  const tokenObj = window.gapi.client.getToken();
+  // FIXED TYPO HERE:
+  const accessToken = tokenObj ? tokenObj.access_token : null;
+  
+  if (!accessToken) {
+      throw new Error("No access token found. Please sign in again.");
+  }
+
   const form = new FormData();
   form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
   form.append('file', file);
