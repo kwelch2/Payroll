@@ -97,6 +97,7 @@ export default function Settings({ rates, setRates, employees, setEmployees, con
              employees={employees} 
              setEmployees={setEmployees}
              rates={rates} 
+             config={config}
           />
         )}
 
