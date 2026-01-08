@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { PayrollRow, MasterRates } from '../types';
 import { 
   X, Printer, CheckSquare, Square, Filter, 
@@ -16,6 +16,7 @@ type SortField = 'name' | 'payLevel' | 'date';
 
 export default function PrintWizard({ data, onClose, rates }: PrintWizardProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('summary');
+  const modalRef = useRef<HTMLDivElement>(null);
   
   // --- FILTERS & SORTING STATE ---
   const [search, setSearch] = useState("");
@@ -32,8 +33,51 @@ export default function PrintWizard({ data, onClose, rates }: PrintWizardProps) 
 
   // Custom Selection Set
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set(data.map(d => d.id)));
+  const [renderAll, setRenderAll] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(200);
 
-  const handlePrint = () => window.print();
+  const previewLimit = 500;
+
+  const handlePrint = () => {
+    setRenderAll(true);
+    window.setTimeout(() => window.print(), 100);
+  };
+
+  useEffect(() => {
+    setRenderAll(false);
+    setVisibleCount(200);
+  }, [search, selectedLevels, selectedCodes, viewMode, sortField, sortAsc]);
+
+  useEffect(() => {
+    const modal = modalRef.current;
+    if (!modal) return;
+    modal.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+      }
+      if (event.key === 'Tab') {
+        const focusables = modal.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusables.length === 0) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+    };
+
+    modal.addEventListener('keydown', handleKeyDown);
+    return () => modal.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
 
   // --- HELPER: Get Color ---
   const getCodeColor = (code: string) => {
@@ -137,7 +181,24 @@ export default function PrintWizard({ data, onClose, rates }: PrintWizardProps) 
     return Array.from(groups.values());
   }, [processedData, rates]);
 
+  const renderedData = useMemo(() => {
+    return renderAll ? processedData : processedData.slice(0, previewLimit);
+  }, [processedData, renderAll, previewLimit]);
+
+  const visibleRows = useMemo(() => {
+    return processedData.slice(0, visibleCount);
+  }, [processedData, visibleCount]);
+
   // --- RENDERERS ---
+
+  interface MultiSelectFilterProps {
+    title: string;
+    options: string[];
+    selectedSet: Set<string>;
+    setFunction: (set: Set<string>) => void;
+    isOpen: boolean;
+    toggleOpen: () => void;
+  }
 
   const MultiSelectFilter = ({ 
     title, 
@@ -146,7 +207,7 @@ export default function PrintWizard({ data, onClose, rates }: PrintWizardProps) 
     setFunction, 
     isOpen, 
     toggleOpen 
-  }: any) => {
+  }: MultiSelectFilterProps) => {
     const toggleItem = (val: string) => {
       const newSet = new Set(selectedSet);
       if (newSet.has(val)) newSet.delete(val);
@@ -249,6 +310,11 @@ export default function PrintWizard({ data, onClose, rates }: PrintWizardProps) 
       <div className="text-center border-b-2 border-black pb-2 mb-4">
         <h3 className="font-bold text-xl uppercase tracking-widest">Detailed Audit Log</h3>
         <p className="text-xs text-gray-500">Line-by-line breakdown • Sorted by {sortField}</p>
+        {processedData.length > previewLimit && !renderAll && (
+          <div className="mt-2 text-[10px] text-amber-600 font-medium">
+            Showing first {previewLimit} rows for performance. Use “Render All” before printing.
+          </div>
+        )}
       </div>
 
       <table className="w-full text-left border-collapse text-[10px] md:text-xs">
@@ -264,7 +330,7 @@ export default function PrintWizard({ data, onClose, rates }: PrintWizardProps) 
            </tr>
          </thead>
          <tbody>
-           {processedData.map((row, i) => {
+           {renderedData.map((row, i) => {
              const pay = row.manual_rate_override !== undefined && row.manual_rate_override !== null
                ? row.manual_rate_override * (rates.pay_codes.definitions.find(d => d.label === row.code)?.type === 'flat' ? 1 : row.hours)
                : (row.total || 0);
@@ -312,18 +378,25 @@ export default function PrintWizard({ data, onClose, rates }: PrintWizardProps) 
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
-      <div className="bg-white w-full max-w-7xl h-[95vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-gray-700">
+      <div
+        ref={modalRef}
+        tabIndex={-1}
+        className="bg-white w-full max-w-7xl h-[95vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-gray-700"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="print-wizard-title"
+      >
         
         {/* TOP BAR - No Print */}
         <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-slate-900 text-white no-print shrink-0">
            <div className="flex items-center gap-3">
              <div className="bg-blue-600 p-2 rounded-lg"><Printer size={20} className="text-white" /></div>
              <div>
-               <h2 className="text-lg font-bold">Print & Finalize</h2>
+               <h2 id="print-wizard-title" className="text-lg font-bold">Print & Finalize</h2>
                <p className="text-xs text-slate-400">Configure report layout and sorting before printing</p>
              </div>
            </div>
-           <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors"><X size={24}/></button>
+           <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors" aria-label="Close print wizard"><X size={24}/></button>
         </div>
 
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
@@ -366,8 +439,10 @@ export default function PrintWizard({ data, onClose, rates }: PrintWizardProps) 
                 
                 {/* Search */}
                 <div className="relative">
+                  <label htmlFor="print-search" className="sr-only">Search names</label>
                   <Search className="absolute left-3 top-2.5 text-gray-400" size={14} />
                   <input 
+                    id="print-search"
                     className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                     placeholder="Search names..."
                     value={search}
@@ -423,6 +498,16 @@ export default function PrintWizard({ data, onClose, rates }: PrintWizardProps) 
                 />
               </div>
 
+              {processedData.length > previewLimit && !renderAll && (
+                <button
+                  type="button"
+                  className="btn-secondary w-full text-sm"
+                  onClick={() => setRenderAll(true)}
+                >
+                  Render All Rows ({processedData.length})
+                </button>
+              )}
+
               {/* 3. Custom Selector (Only visible in Custom Mode) */}
               {viewMode === 'custom' && (
                 <div className="flex-1 flex flex-col bg-white border border-gray-200 rounded-lg shadow-inner overflow-hidden min-h-[200px]">
@@ -441,7 +526,7 @@ export default function PrintWizard({ data, onClose, rates }: PrintWizardProps) 
                       {processedData.length === 0 ? (
                         <div className="p-4 text-center text-xs text-gray-400">No rows match your filters.</div>
                       ) : (
-                        processedData.map(row => (
+                        visibleRows.map(row => (
                           <button 
                             key={row.id}
                             onClick={() => {
@@ -460,6 +545,17 @@ export default function PrintWizard({ data, onClose, rates }: PrintWizardProps) 
                         ))
                       )}
                    </div>
+                   {processedData.length > visibleRows.length && (
+                     <div className="border-t border-gray-200 p-2">
+                       <button
+                         type="button"
+                         className="w-full btn-secondary text-xs"
+                         onClick={() => setVisibleCount(prev => prev + 200)}
+                       >
+                         Load More ({visibleRows.length} of {processedData.length})
+                       </button>
+                     </div>
+                   )}
                 </div>
               )}
 
@@ -527,16 +623,6 @@ export default function PrintWizard({ data, onClose, rates }: PrintWizardProps) 
            </div>
         </div>
       </div>
-      
-      {/* Force Print Colors */}
-      <style>{`
-        @media print {
-          .print-color-exact {
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-          }
-        }
-      `}</style>
     </div>
   );
 }
