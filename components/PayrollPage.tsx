@@ -4,6 +4,8 @@ import Editor from './Editor';
 import { PayrollRow, Employee, MasterRates } from '../types';
 import { listAllPayrollRuns, loadJsonFile, DriveFile, SystemIds } from '../services/driveService';
 import { calculatePayRow } from '../services/payrollService';
+import { useFeedback } from './FeedbackProvider';
+import { getErrorMessage } from '../services/errorUtils';
 
 interface PayrollPageProps {
   data: PayrollRow[];
@@ -20,23 +22,38 @@ export default function PayrollPage({ data, setData, employees, rates, systemIds
   const [loadingMsg, setLoadingMsg] = useState("");
   
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { notify, confirm } = useFeedback();
 
   // --- ACTIONS ---
 
   const handleListFiles = async () => {
     if (!systemIds) {
-      alert("System not fully initialized. Please wait or refresh.");
+      notify('error', 'System not fully initialized. Please wait or refresh.');
       return;
     }
     setShowLoadModal(true);
     setIsLoadingList(true);
-    const files = await listAllPayrollRuns(systemIds.rootId);
-    setFileList(files);
-    setIsLoadingList(false);
+    try {
+      const files = await listAllPayrollRuns(systemIds.rootId);
+      setFileList(files);
+    } catch (err) {
+      console.error(err);
+      notify('error', getErrorMessage(err, 'Failed to load payroll runs.'));
+    } finally {
+      setIsLoadingList(false);
+    }
   };
 
   const handleLoadFile = async (file: DriveFile) => {
-    if(data.length > 0 && !confirm(`Load "${file.name}"? Unsaved changes will be lost.`)) return;
+    if (data.length > 0) {
+      const approved = await confirm({
+        title: 'Load Saved Run',
+        message: `Load "${file.name}"? Unsaved changes will be lost.`,
+        confirmLabel: 'Load',
+        cancelLabel: 'Cancel'
+      });
+      if (!approved) return;
+    }
     
     setLoadingMsg("Downloading...");
     try {
@@ -45,18 +62,26 @@ export default function PayrollPage({ data, setData, employees, rates, systemIds
         setData(content.rows);
         setShowLoadModal(false);
       } else {
-        alert("File appears to be empty or invalid format.");
+        notify('error', 'File appears to be empty or invalid format.');
       }
     } catch (err) {
       console.error(err);
-      alert("Failed to load file.");
+      notify('error', getErrorMessage(err, 'Failed to load file.'));
     } finally {
       setLoadingMsg("");
     }
   };
 
-  const handleNewRun = () => {
-    if(data.length > 0 && !confirm("Start a new run? Current rows will be cleared.")) return;
+  const handleNewRun = async () => {
+    if (data.length > 0) {
+      const approved = await confirm({
+        title: 'Start New Run',
+        message: 'Start a new run? Current rows will be cleared.',
+        confirmLabel: 'Start',
+        cancelLabel: 'Cancel'
+      });
+      if (!approved) return;
+    }
     setData([]);
     if (fileInputRef.current) {
       fileInputRef.current.value = ''; 
@@ -93,7 +118,7 @@ export default function PayrollPage({ data, setData, employees, rates, systemIds
       }
 
       if (headerIndex === -1) {
-        alert("Could not detect CSV Headers. File must contain 'Last Name' (or 'Employee') and 'Pay Code'.");
+        notify('error', "Could not detect CSV Headers. File must contain 'Last Name' (or 'Employee') and 'Pay Code'.");
         return;
       }
 
@@ -157,9 +182,9 @@ export default function PayrollPage({ data, setData, employees, rates, systemIds
       
       if (newRows.length > 0) {
         setData(newRows);
-        alert(`Successfully imported ${newRows.length} rows.`);
+        notify('success', `Successfully imported ${newRows.length} rows.`);
       } else {
-        alert("No valid rows found. Please check your CSV format.");
+        notify('error', 'No valid rows found. Please check your CSV format.');
       }
     };
     reader.readAsText(file);

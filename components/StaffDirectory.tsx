@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Search, UserPlus, Edit2, Trash2, X, User, MapPin, Calendar, Briefcase, DollarSign } from 'lucide-react';
 import { Employee, MasterRates, AppConfig } from '../types';
+import { useFeedback } from './FeedbackProvider';
 
 interface StaffDirectoryProps {
   employees: Employee[];
@@ -12,6 +13,7 @@ interface StaffDirectoryProps {
 export default function StaffDirectory({ employees, setEmployees, rates, config }: StaffDirectoryProps) {
   const [search, setSearch] = useState("");
   const [fullEditEmp, setFullEditEmp] = useState<Employee | null>(null);
+  const { confirm } = useFeedback();
 
   // --- ACTIONS ---
   const handleAdd = () => {
@@ -42,8 +44,14 @@ export default function StaffDirectory({ employees, setEmployees, rates, config 
     setFullEditEmp(null);
   };
 
-  const handleDelete = (id: string) => {
-    if (confirm("Delete this employee?")) {
+  const handleDelete = async (id: string) => {
+    const approved = await confirm({
+      title: 'Delete Employee',
+      message: 'Delete this employee?',
+      confirmLabel: 'Delete',
+      cancelLabel: 'Cancel'
+    });
+    if (approved) {
       setEmployees(employees.filter(e => e.id !== id));
     }
   };
@@ -93,8 +101,10 @@ export default function StaffDirectory({ employees, setEmployees, rates, config 
       {/* Toolbar */}
       <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50 sticky top-0 z-10">
          <div className="relative">
+            <label htmlFor="staff-search" className="sr-only">Search personnel</label>
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
             <input 
+              id="staff-search"
               className="pl-9 pr-4 py-2 bg-white border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none w-64 shadow-sm" 
               placeholder="Search personnel..."
               value={search}
@@ -141,10 +151,10 @@ export default function StaffDirectory({ employees, setEmployees, rates, config 
                       </td>
                       <td className="p-4 text-right">
                          <div className="flex justify-end gap-2">
-                            <button onClick={() => setFullEditEmp(emp)} className="p-2 rounded-lg bg-white border border-gray-200 text-gray-600 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all shadow-sm">
+                            <button onClick={() => setFullEditEmp(emp)} className="p-2 rounded-lg bg-white border border-gray-200 text-gray-600 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all shadow-sm" aria-label={`Edit ${emp.personal.full_name}`}>
                                <Edit2 size={16} />
                             </button>
-                            <button onClick={() => handleDelete(emp.id)} className="p-2 rounded-lg bg-white border border-gray-200 text-red-500 hover:bg-red-50 hover:border-red-200 transition-all shadow-sm">
+                            <button onClick={() => handleDelete(emp.id)} className="p-2 rounded-lg bg-white border border-gray-200 text-red-500 hover:bg-red-50 hover:border-red-200 transition-all shadow-sm" aria-label={`Delete ${emp.personal.full_name}`}>
                                <Trash2 size={16} />
                             </button>
                          </div>
@@ -170,7 +180,7 @@ export default function StaffDirectory({ employees, setEmployees, rates, config 
                     <p className="text-xs text-gray-500">Update personnel records and payroll settings</p>
                  </div>
               </div>
-              <button onClick={() => setFullEditEmp(null)} className="text-gray-400 hover:text-gray-600 hover:bg-gray-200 p-2 rounded-full transition-colors">
+              <button onClick={() => setFullEditEmp(null)} className="text-gray-400 hover:text-gray-600 hover:bg-gray-200 p-2 rounded-full transition-colors" aria-label="Close employee editor">
                 <X size={24} />
               </button>
             </div>

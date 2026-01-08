@@ -1,5 +1,6 @@
 import { Plus, Trash2 } from 'lucide-react'; // Removed unused imports
 import { MasterRates, PayCodeDefinition } from '../types';
+import { useFeedback } from './FeedbackProvider';
 
 interface PayCodeEditorProps {
   rates: MasterRates;
@@ -7,6 +8,7 @@ interface PayCodeEditorProps {
 }
 
 export default function PayCodeEditor({ rates, setRates }: PayCodeEditorProps) {
+  const { confirm } = useFeedback();
   
   const handleUpdate = (index: number, field: keyof PayCodeDefinition, value: any) => {
     const newDefs = [...rates.pay_codes.definitions];
@@ -14,8 +16,14 @@ export default function PayCodeEditor({ rates, setRates }: PayCodeEditorProps) {
     setRates({ ...rates, pay_codes: { ...rates.pay_codes, definitions: newDefs } });
   };
 
-  const handleDelete = (index: number) => {
-    if(!confirm("Delete this pay code? Existing payroll records using it might break.")) return;
+  const handleDelete = async (index: number) => {
+    const approved = await confirm({
+      title: 'Delete Pay Code',
+      message: 'Delete this pay code? Existing payroll records using it might break.',
+      confirmLabel: 'Delete',
+      cancelLabel: 'Cancel'
+    });
+    if (!approved) return;
     const newDefs = rates.pay_codes.definitions.filter((_, i) => i !== index);
     setRates({ ...rates, pay_codes: { ...rates.pay_codes, definitions: newDefs } });
   };
@@ -101,6 +109,7 @@ export default function PayCodeEditor({ rates, setRates }: PayCodeEditorProps) {
                     onClick={() => handleDelete(idx)}
                     className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                     title="Delete Code"
+                    aria-label={`Delete ${def.label}`}
                   >
                     <Trash2 size={16} />
                   </button>

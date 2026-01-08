@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { MasterRates } from '../types';
 import { Plus, Trash2 } from 'lucide-react';
+import { useFeedback } from './FeedbackProvider';
 
 interface RateMatrixProps {
   rates: MasterRates;
@@ -9,6 +10,7 @@ interface RateMatrixProps {
 
 export default function RateMatrix({ rates, setRates }: RateMatrixProps) {
   const [newLevelName, setNewLevelName] = useState("");
+  const { notify, confirm } = useFeedback();
 
   const payCodes = rates.pay_codes.definitions;
   // Filter out "Hourly Only" if you don't want it, or keep it. 
@@ -33,8 +35,14 @@ export default function RateMatrix({ rates, setRates }: RateMatrixProps) {
   };
 
   const handleAddLevel = () => {
-    if (!newLevelName.trim()) return alert("Please enter a name for the new Pay Level.");
-    if (rates.pay_levels[newLevelName]) return alert("This Pay Level already exists.");
+    if (!newLevelName.trim()) {
+      notify('error', 'Please enter a name for the new Pay Level.');
+      return;
+    }
+    if (rates.pay_levels[newLevelName]) {
+      notify('error', 'This Pay Level already exists.');
+      return;
+    }
 
     const newRates = { ...rates };
     newRates.pay_levels[newLevelName] = {
@@ -47,8 +55,14 @@ export default function RateMatrix({ rates, setRates }: RateMatrixProps) {
     setNewLevelName("");
   };
 
-  const handleDeleteLevel = (level: string) => {
-    if (!confirm(`Are you sure you want to delete "${level}"? This might break employees assigned to this level.`)) return;
+  const handleDeleteLevel = async (level: string) => {
+    const approved = await confirm({
+      title: 'Delete Pay Level',
+      message: `Are you sure you want to delete "${level}"? This might break employees assigned to this level.`,
+      confirmLabel: 'Delete',
+      cancelLabel: 'Cancel'
+    });
+    if (!approved) return;
     
     const newRates = { ...rates };
     delete newRates.pay_levels[level];
@@ -154,6 +168,7 @@ export default function RateMatrix({ rates, setRates }: RateMatrixProps) {
                       onClick={() => handleDeleteLevel(level)}
                       className="p-2 text-gray-300 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
                       title="Delete Level"
+                      aria-label={`Delete ${level}`}
                     >
                       <Trash2 size={16} />
                     </button>

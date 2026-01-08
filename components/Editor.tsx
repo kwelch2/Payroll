@@ -1,14 +1,16 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { PayrollRow, Employee, MasterRates } from '../types';
 import { calculatePayRow, getRowColor } from '../services/payrollService';
 import { saveJsonFile, SystemIds } from '../services/driveService';
 import { 
   Edit2, Printer, RefreshCw, FileUp, 
   AlertTriangle, UploadCloud, ChevronRight, 
-  Filter, Clock, DollarSign, Calendar, Hash 
+  Filter, Clock, DollarSign, Hash 
 } from 'lucide-react';
 import RowModal from './RowModal';
 import PrintWizard from './PrintWizard';
+import { useFeedback } from './FeedbackProvider';
+import { getErrorMessage } from '../services/errorUtils';
 
 interface EditorProps {
   data: PayrollRow[];
@@ -25,6 +27,7 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
   const [editingRow, setEditingRow] = useState<PayrollRow | null>(null);
   const [showPrintWizard, setShowPrintWizard] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const { notify, confirm, prompt } = useFeedback();
   
   // Filter States
   const [viewMode, setViewMode] = useState<ViewMode>('summary');
@@ -33,6 +36,8 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
   // Accordion States
   const [collapsedEmp, setCollapsedEmp] = useState<Set<string>>(new Set());
   const [expandedCode, setExpandedCode] = useState<Set<string>>(new Set());
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 100;
 
   // --- Helpers ---
 
@@ -68,6 +73,16 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
       return true;
     });
   }, [data, filterMode]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterMode, filteredData.length]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredData.length / pageSize));
+  const pagedData = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredData.slice(start, start + pageSize);
+  }, [filteredData, currentPage, pageSize]);
 
   // --- Grouping ---
   const groupedData = useMemo(() => {
@@ -129,8 +144,14 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
     setEditingRow(null);
   };
 
-  const handleDeleteRow = (id: string) => {
-    if(confirm('Are you sure you want to delete this line?')) {
+  const handleDeleteRow = async (id: string) => {
+    const approved = await confirm({
+      title: 'Delete Line Item',
+      message: 'Are you sure you want to delete this line?',
+      confirmLabel: 'Delete',
+      cancelLabel: 'Cancel'
+    });
+    if (approved) {
       setData(data.filter(r => r.id !== id));
       setEditingRow(null);
     }
@@ -149,25 +170,31 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
       return calc;
     });
     setData(refreshed);
-    alert('Draft refreshed with latest rates/staff settings.');
+    notify('success', 'Draft refreshed with latest rates/staff settings.');
   };
 
   const handleSaveToDrive = async () => {
     if (data.length === 0) return;
     if (!systemIds) {
-        alert("System connection lost. Please refresh.");
+        notify('error', 'System connection lost. Please refresh.');
         return;
     }
 
     const dateStr = new Date().toISOString().split('T')[0];
     const defaultName = `Payroll_Run_${dateStr}`;
 
-    let filename = prompt("Enter a name for this payroll file:", defaultName);
+    let filename = await prompt({
+      title: 'Save Payroll Run',
+      message: 'Enter a name for this payroll file:',
+      initialValue: defaultName,
+      confirmLabel: 'Save',
+      cancelLabel: 'Cancel'
+    });
     if (filename === null) return; 
 
     filename = filename.trim();
     if (filename === "") {
-      alert("Filename cannot be empty.");
+      notify('error', 'Filename cannot be empty.');
       return;
     }
     if (!filename.toLowerCase().endsWith('.json')) {
@@ -177,10 +204,10 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
     try {
       setIsSaving(true);
       await saveJsonFile(filename, { meta: { date: dateStr, stats }, rows: data }, systemIds.currentYearId);
-      alert(`Successfully saved to Drive as: ${filename}`);
+      notify('success', `Successfully saved to Drive as: ${filename}`);
     } catch (err) {
       console.error(err);
-      alert("Failed to save to Drive. Check console for details.");
+      notify('error', getErrorMessage(err, 'Failed to save to Drive.'));
     } finally {
       setIsSaving(false);
     }
@@ -205,7 +232,7 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
       }
 
       if (headerIndex === -1) {
-        alert("Could not find valid header row. Ensure CSV has 'Last Name', 'Start Date', etc.");
+        notify('error', "Could not find valid header row. Ensure CSV has 'Last Name', 'Start Date', etc.");
         return;
       }
 
@@ -238,7 +265,9 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
       
       if (newRows.length > 0) {
         setData(newRows);
-        alert(`Successfully imported ${newRows.length} rows.`);
+        notify('success', `Successfully imported ${newRows.length} rows.`);
+      } else {
+        notify('error', 'No valid rows found. Please check your CSV format.');
       }
     };
     reader.readAsText(file);
@@ -267,9 +296,11 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
         </div>
 
         {/* Standby Qty (Clickable) */}
-        <div 
+        <button 
+          type="button"
           onClick={() => setFilterMode(filterMode === 'standby' ? 'all' : 'standby')}
-          className={`p-4 rounded-xl shadow-sm border cursor-pointer transition-all hover:shadow-md active:scale-95 flex flex-col
+          aria-pressed={filterMode === 'standby'}
+          className={`p-4 rounded-xl shadow-sm border cursor-pointer transition-all hover:shadow-md active:scale-95 flex flex-col text-left
             ${filterMode === 'standby' ? 'bg-blue-50 border-blue-400 ring-2 ring-blue-100' : 'bg-white border-gray-200 hover:bg-blue-50/50'}`}
         >
           <span className={`text-xs font-bold uppercase tracking-wider flex items-center gap-2 ${filterMode === 'standby' ? 'text-blue-700' : 'text-gray-400'}`}>
@@ -277,12 +308,14 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
           </span>
           <span className={`text-2xl font-bold mt-1 ${filterMode === 'standby' ? 'text-blue-800' : 'text-blue-600'}`}>{stats.standbyQty.toFixed(0)}</span>
           {filterMode === 'standby' && <div className="text-[10px] text-blue-600 font-medium mt-1">Filtering Active</div>}
-        </div>
+        </button>
 
         {/* Flags/Errors (Clickable) */}
-        <div 
+        <button 
+          type="button"
           onClick={() => setFilterMode(filterMode === 'flagged' ? 'all' : 'flagged')}
-          className={`p-4 rounded-xl shadow-sm border cursor-pointer transition-all hover:shadow-md active:scale-95 flex flex-col
+          aria-pressed={filterMode === 'flagged'}
+          className={`p-4 rounded-xl shadow-sm border cursor-pointer transition-all hover:shadow-md active:scale-95 flex flex-col text-left
             ${filterMode === 'flagged' ? 'bg-red-50 border-red-400 ring-2 ring-red-100' : 'bg-white border-gray-200 hover:bg-red-50/50'}
             ${stats.flagged > 0 ? 'border-gray-200' : 'opacity-70'}`}
         >
@@ -291,7 +324,7 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
           </span>
           <span className={`text-2xl font-bold mt-1 ${filterMode === 'flagged' || stats.flagged > 0 ? 'text-red-700' : 'text-gray-900'}`}>{stats.flagged}</span>
           {filterMode === 'flagged' && <div className="text-[10px] text-red-600 font-medium mt-1">Filtering Active</div>}
-        </div>
+        </button>
       </div>
 
       {/* --- CONTROLS --- */}
@@ -331,16 +364,16 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
 
            <div className="h-6 w-px bg-gray-300 mx-1"></div>
 
-           <label className="btn-icon" title="Import CSV">
+           <label className="btn-icon" title="Import CSV" aria-label="Import CSV">
              <FileUp size={18} />
              <input type="file" accept=".csv" className="hidden" onChange={handleCSVImport} />
            </label>
            
-           <button onClick={handleRefreshDraft} className="btn-icon" title="Refresh Rates">
+           <button onClick={handleRefreshDraft} className="btn-icon" title="Refresh Rates" aria-label="Refresh Rates">
              <RefreshCw size={18} />
            </button>
            
-           <button onClick={handleSaveToDrive} disabled={isSaving} className={`btn-icon ${isSaving ? 'opacity-50' : ''}`} title="Save to Drive">
+           <button onClick={handleSaveToDrive} disabled={isSaving} className={`btn-icon ${isSaving ? 'opacity-50' : ''}`} title="Save to Drive" aria-label="Save to Drive">
              {isSaving ? <span className="animate-spin text-xs">⏳</span> : <UploadCloud size={18} />}
            </button>
 
@@ -488,7 +521,7 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
                 {filteredData.length === 0 ? (
                   <tr><td colSpan={9} className="p-8 text-center text-gray-400">No data found matching your filters.</td></tr>
                 ) : (
-                  filteredData.map((row) => {
+                  pagedData.map((row) => {
                     const baseColor = getRowColor(row.code, rates);
                     const rowBg = `${baseColor}20`; // Low opacity hex
                     const effectiveTotal = getEffectiveTotal(row);
@@ -542,6 +575,31 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
                 )}
               </tbody>
             </table>
+            {filteredData.length > pageSize && (
+              <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 text-sm bg-gray-50">
+                <span className="text-gray-500">
+                  Page {currentPage} of {totalPages} • {filteredData.length} rows
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                    disabled={currentPage === 1}
+                  >
+                    Previous
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                    disabled={currentPage === totalPages}
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -565,11 +623,6 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
         />
       )}
 
-      <style>{`
-        .btn-icon {
-          @apply p-2 rounded-lg bg-white border border-gray-200 text-gray-600 hover:bg-gray-50 hover:text-blue-600 transition-all shadow-sm flex items-center justify-center;
-        }
-      `}</style>
     </div>
   );
 }
