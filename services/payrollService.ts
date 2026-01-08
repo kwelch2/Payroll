@@ -2,86 +2,92 @@ import { PayrollRow, Employee, MasterRates } from '../types';
 
 export function calculatePayRow(
   empName: string, 
-  code: string, 
+  rawCode: string, // This might be "Shift Pay" (Label) or "shift_pay" (Code)
   hoursOrQty: number, 
   employees: Employee[], 
   rates: MasterRates
 ): PayrollRow {
   
   // 1. Find the Employee
-  // We match by "Last, First" or "First Last" to be safe, or ID if possible
+  // Robust matching for "Last, First", "First Last", or exact matches
   const employee = employees.find(e => {
-    const nameMatches = e.personal.full_name === empName || 
-                        `${e.personal.last_name}, ${e.personal.first_name}` === empName ||
-                        `${e.personal.first_name} ${e.personal.last_name}` === empName;
-    return nameMatches;
+    if (!e.personal) return false;
+    const full = e.personal.full_name?.toLowerCase() || "";
+    const firstLast = `${e.personal.first_name} ${e.personal.last_name}`.toLowerCase();
+    const lastFirst = `${e.personal.last_name}, ${e.personal.first_name}`.toLowerCase();
+    const search = empName.toLowerCase().trim();
+    
+    return full === search || firstLast === search || lastFirst === search;
   });
 
-  // Default Object if employee not found
   if (!employee) {
-    return createEmptyRow(empName, code, hoursOrQty, "Employee not found");
+    return createEmptyRow(empName, rawCode, hoursOrQty, "Employee not found");
   }
 
-  // 2. Determine Rate Strategy
+  // 2. Resolve Pay Code (The Fix)
+  // We must convert the CSV label (e.g. "Shift Pay") to the System ID (e.g. "shift_pay")
+  // to look up rates correctly in the database.
+  const def = rates.pay_codes.definitions.find(
+    d => d.label.toLowerCase() === rawCode.toLowerCase() || 
+         d.code.toLowerCase() === rawCode.toLowerCase()
+  );
+
+  if (!def) {
+    return createEmptyRow(empName, rawCode, hoursOrQty, "Unknown Pay Code", 'error');
+  }
+
+  const systemCode = def.code; // Use this for lookups (e.g. "shift_pay")
+
+  // 3. Determine Rate Strategy
   let rate = 0;
   let usedCustomRate = false;
 
   // STRATEGY A: User Profile Pay Scale (Override)
   if (employee.payroll_config?.use_user_pay_scale) {
-    const customRate = employee.payroll_config.custom_rates?.[code];
+    const customRate = employee.payroll_config.custom_rates?.[systemCode];
     
-    // If a custom rate exists (even if 0), use it. 
-    // If it's undefined, it means it wasn't set in their profile.
+    // If a custom rate is explicitly defined (even 0), use it.
     if (customRate !== undefined && customRate !== null) {
       rate = customRate;
       usedCustomRate = true;
     } else {
-      // Fallback: If they are on "User-Pay-Level" but haven't defined a rate for this code,
-      // we default to 0 to prevent accidental matrix inheritance.
+      // If the User Profile is active but has NO rate for this code, 
+      // we default to 0 to prevent accidentally inheriting a rate from the standard matrix.
       rate = 0;
+      usedCustomRate = true; 
     }
   } 
   
   // STRATEGY B: Master Matrix Lookup
   // Only run if we didn't use a custom rate
   if (!usedCustomRate) {
+    // If pay_level is missing, default to 'Hourly Only' to avoid crashing
     const level = employee.classifications.pay_level || 'Hourly Only';
-    const levelRates = rates.pay_levels[level]?.rates;
+    const levelData = rates.pay_levels[level];
     
-    if (levelRates && levelRates[code] !== undefined) {
-      rate = levelRates[code];
+    if (levelData && levelData.rates && levelData.rates[systemCode] !== undefined) {
+      rate = levelData.rates[systemCode];
     }
   }
 
-  // 3. Calculate Total
-  // Note: For 'Flat' items, hoursOrQty acts as the Quantity.
-  // For 'Hourly' items, it acts as Hours.
-  // The math is the same: Rate * Qty.
+  // 4. Calculate Total
   const total = rate * hoursOrQty;
 
-  // 4. Generate Alert Flags
+  // 5. Generate Alert Flags
   let alert = "";
   let alertLevel: 'info' | 'warning' | 'error' | undefined = undefined;
 
-  // Check 1: Missing Rate
+  // Warn if rate is 0 (unless it's a known unpaid code if you have those)
   if (rate === 0 && total === 0) {
-    // It's okay for unpaid codes, but flag it just in case
     alert = "Zero Rate";
     alertLevel = 'warning';
   }
 
-  // Check 2: Pay Code Existence
-  const def = rates.pay_codes.definitions.find(d => d.label === code || d.code === code);
-  if (!def) {
-    alert = "Unknown Pay Code";
-    alertLevel = 'error';
-  }
-
   return {
     id: `row-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-    name: employee.personal.full_name, // Standardize name
+    name: employee.personal.full_name,
     payLevel: employee.classifications.pay_level,
-    code: code,
+    code: def.label, // Show the readable Label (e.g. "Shift Pay") in the table
     hours: hoursOrQty,
     rate: rate,
     total: total,
@@ -90,14 +96,17 @@ export function calculatePayRow(
   };
 }
 
-export function getRowColor(code: string, rates: MasterRates): string {
-  const def = rates.pay_codes.definitions.find(d => d.label === code || d.code === code);
-  return def?.color || '#e2e8f0'; // Default gray if not found
+export function getRowColor(rawCode: string, rates: MasterRates): string {
+  const def = rates.pay_codes.definitions.find(
+    d => d.label.toLowerCase() === rawCode.toLowerCase() || 
+         d.code.toLowerCase() === rawCode.toLowerCase()
+  );
+  return def?.color || '#e2e8f0';
 }
 
-function createEmptyRow(name: string, code: string, hours: number, error: string): PayrollRow {
+function createEmptyRow(name: string, code: string, hours: number, error: string, level: 'info' | 'warning' | 'error' = 'warning'): PayrollRow {
   return {
-    id: `row-${Date.now()}`,
+    id: `row-${Date.now()}-${Math.random()}`,
     name,
     payLevel: 'Unknown',
     code,
@@ -105,6 +114,6 @@ function createEmptyRow(name: string, code: string, hours: number, error: string
     rate: 0,
     total: 0,
     alert: error,
-    alertLevel: 'error'
+    alertLevel: level
   };
 }
