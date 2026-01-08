@@ -1,16 +1,22 @@
 import { INITIAL_RATES, INITIAL_EMPLOYEES, INITIAL_CONFIG } from '../constants';
 
+// --- CONFIGURATION ---
+const HARDCODED_ROOT_ID = "1MYPXAh9-juU58I403toaS3CqigObEjKn"; 
+
+
+const API_KEY = import.meta.env.VITE_GOOGLE_API_KEY;
+const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+const DISCOVERY_DOCS = ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"];
+
+// CHANGED: Widen scope to ensure we see files created by Admin
+const SCOPES = "https://www.googleapis.com/auth/drive"; 
+
 declare global {
   interface Window {
     gapi: any;
     google: any;
   }
 }
-
-const API_KEY = import.meta.env.VITE_GOOGLE_API_KEY;
-const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
-const DISCOVERY_DOCS = ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"];
-const SCOPES = "https://www.googleapis.com/auth/drive.file";
 
 let tokenClient: any;
 
@@ -63,10 +69,20 @@ export interface SystemIds {
 }
 
 export async function initializeSystem(): Promise<{ ids: SystemIds, data: any }> {
-  const rootName = "Gem_Payroll_System";
-  let rootId = await findFile(rootName, 'application/vnd.google-apps.folder');
-  if (!rootId) rootId = await createFolder(rootName);
+  
+  // 1. Use the Hardcoded ID directly
+  // This solves the "Ghost Folder" issue
+  const rootId = HARDCODED_ROOT_ID;
+  
+  // Safety check: verify we can access this folder
+  try {
+    await window.gapi.client.drive.files.get({ fileId: rootId });
+  } catch (err) {
+    console.error("Cannot access Hardcoded Root Folder. Check ID or Permissions.", err);
+    throw new Error("Cannot access Root Folder. Please ensure it is shared with you.");
+  }
 
+  // 2. Find/Create Subfolders inside the known Root
   let configId = await findFile("00_Config", 'application/vnd.google-apps.folder', rootId);
   if (!configId) configId = await createFolder("00_Config", rootId);
 
@@ -77,7 +93,8 @@ export async function initializeSystem(): Promise<{ ids: SystemIds, data: any }>
 
   const ids = { rootId, configId, currentYearId: yearFolderId };
 
-  // Load Config Files
+  // 3. Load Config Files
+  // We use Promise.all to load them in parallel
   const [rates, employees, config] = await Promise.all([
     ensureFile('master_rates.json', ids.configId, INITIAL_RATES),
     ensureFile('personnel_master_db.json', ids.configId, { employees: INITIAL_EMPLOYEES }),
@@ -88,13 +105,13 @@ export async function initializeSystem(): Promise<{ ids: SystemIds, data: any }>
     ids,
     data: {
       rates,
-      employees: employees?.employees || employees || [], // Safe unwrap
+      employees: employees?.employees || employees || [],
       config
     }
   };
 }
 
-// --- BULLETPROOF JSON LOADER (The Fix) ---
+// --- BULLETPROOF JSON LOADER ---
 export async function loadJsonFile(fileId: string) {
   try {
     const response = await window.gapi.client.drive.files.get({
@@ -102,28 +119,16 @@ export async function loadJsonFile(fileId: string) {
       alt: 'media',
     });
 
-    // Strategy 1: GAPI auto-parsed it into .result
     if (response.result && typeof response.result === 'object' && Object.keys(response.result).length > 0) {
       return response.result;
     }
-
-    // Strategy 2: It's in .body as a string
     if (response.body) {
-      try {
-        return JSON.parse(response.body);
-      } catch (e) {
-        console.warn("Body parse failed, trying result string");
-      }
+      try { return JSON.parse(response.body); } catch (e) { console.warn("Body parse failed"); }
     }
-
-    // Strategy 3: It's in .result as a string (rare but possible)
     if (typeof response.result === 'string') {
       return JSON.parse(response.result);
     }
-
-    console.error("File loaded but content was empty or invalid format.");
     return null;
-
   } catch (err) {
     console.error(`Error loading file [${fileId}]:`, err);
     return null;
@@ -138,7 +143,8 @@ async function ensureFile(filename: string, parentId: string, defaultContent: an
     console.log(`Loading existing ${filename}...`);
     return await loadJsonFile(existingId);
   } else {
-    console.log(`Creating new ${filename}...`);
+    // Only create if it TRULY doesn't exist
+    console.log(`File ${filename} not found. Creating new default...`);
     await saveJsonFile(filename, defaultContent, parentId);
     return defaultContent;
   }
@@ -156,6 +162,7 @@ async function findFile(name: string, mimeType: string, parentId?: string): Prom
     const files = response.result.files;
     return (files && files.length > 0) ? files[0].id : null;
   } catch (err) {
+    console.error("Error finding file:", err);
     return null;
   }
 }
@@ -175,6 +182,7 @@ export async function saveJsonFile(filename: string, content: any, parentId: str
   const fileContent = JSON.stringify(content, null, 2);
   const file = new Blob([fileContent], { type: 'application/json' });
   const existingId = await findFile(filename, 'application/json', parentId);
+  
   const tokenObj = window.gapi.client.getToken();
   if (!tokenObj) throw new Error("No Access Token");
   
@@ -195,7 +203,7 @@ export async function saveJsonFile(filename: string, content: any, parentId: str
 }
 
 export async function listAllPayrollRuns(_rootId: string): Promise<DriveFile[]> {
-  const q = `name contains 'Payroll_Run' and mimeType = 'application/json' and trashed = false`;
+  const q = `name contains 'Payroll_Run' and mimeType = 'application/json' and trashed = false and '${_rootId}' in parents`;
   try {
     const response = await window.gapi.client.drive.files.list({
       q: q,
@@ -207,10 +215,6 @@ export async function listAllPayrollRuns(_rootId: string): Promise<DriveFile[]> 
   } catch (err) {
     return [];
   }
-}
-
-export async function listSavedFiles(_folderId: string): Promise<DriveFile[]> {
-  return listAllPayrollRuns(_folderId);
 }
 
 export interface DriveFile {
