@@ -58,9 +58,10 @@ export default function SystemDefs({ config, setConfig }: SystemDefsProps) {
   );
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 p-6 h-full">
+    <div className="grid grid-cols-1 md:grid-cols-4 gap-6 p-6 h-full">
       <Section title="Rank Structure" dataKey="ranks" />
       <Section title="EMS Cert Levels" dataKey="ems_cert_levels" />
+      <Section title="Fire Statuses" dataKey="fire_statuses" />
       <Section title="Cell Carriers" dataKey="carriers" />
     </div>
   );

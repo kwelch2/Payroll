@@ -7,6 +7,7 @@ import RateMatrix from './RateMatrix';
 import PayCodeEditor from './PayCodeEditor';
 import SystemDefs from './SystemDefs';
 import { useFeedback } from './FeedbackProvider';
+import { getErrorMessage } from '../services/errorUtils';
 
 interface SettingsProps {
   rates: MasterRates;
@@ -48,7 +49,7 @@ export default function Settings({ rates, setRates, employees, setEmployees, con
       notify('success', 'Configuration saved successfully!');
     } catch (err) {
       console.error(err);
-      notify('error', 'Failed to save configuration.');
+      notify('error', getErrorMessage(err, 'Failed to save configuration.'));
     } finally {
       setIsSaving(false);
     }

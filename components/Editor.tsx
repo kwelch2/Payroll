@@ -10,6 +10,7 @@ import {
 import RowModal from './RowModal';
 import PrintWizard from './PrintWizard';
 import { useFeedback } from './FeedbackProvider';
+import { getErrorMessage } from '../services/errorUtils';
 
 interface EditorProps {
   data: PayrollRow[];
@@ -206,7 +207,7 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
       notify('success', `Successfully saved to Drive as: ${filename}`);
     } catch (err) {
       console.error(err);
-      notify('error', 'Failed to save to Drive. Check console for details.');
+      notify('error', getErrorMessage(err, 'Failed to save to Drive.'));
     } finally {
       setIsSaving(false);
     }

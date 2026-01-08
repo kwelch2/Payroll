@@ -5,6 +5,7 @@ import { PayrollRow, Employee, MasterRates } from '../types';
 import { listAllPayrollRuns, loadJsonFile, DriveFile, SystemIds } from '../services/driveService';
 import { calculatePayRow } from '../services/payrollService';
 import { useFeedback } from './FeedbackProvider';
+import { getErrorMessage } from '../services/errorUtils';
 
 interface PayrollPageProps {
   data: PayrollRow[];
@@ -37,7 +38,7 @@ export default function PayrollPage({ data, setData, employees, rates, systemIds
       setFileList(files);
     } catch (err) {
       console.error(err);
-      notify('error', 'Failed to load payroll runs.');
+      notify('error', getErrorMessage(err, 'Failed to load payroll runs.'));
     } finally {
       setIsLoadingList(false);
     }
@@ -65,7 +66,7 @@ export default function PayrollPage({ data, setData, employees, rates, systemIds
       }
     } catch (err) {
       console.error(err);
-      notify('error', 'Failed to load file.');
+      notify('error', getErrorMessage(err, 'Failed to load file.'));
     } finally {
       setLoadingMsg("");
     }
