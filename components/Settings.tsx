@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { Save, Loader, CheckCircle } from 'lucide-react';
+import { Save, Loader } from 'lucide-react';
 import { MasterRates, Employee, AppConfig } from '../types';
 import { saveJsonFile, SystemIds } from '../services/driveService'; // Import save tools
 import StaffDirectory from './StaffDirectory';
 import RateMatrix from './RateMatrix';
 import PayCodeEditor from './PayCodeEditor';
 import SystemDefs from './SystemDefs';
+import { useFeedback } from './FeedbackProvider';
 
 interface SettingsProps {
   rates: MasterRates;
@@ -20,14 +21,21 @@ interface SettingsProps {
 export default function Settings({ rates, setRates, employees, setEmployees, config, setConfig, systemIds }: SettingsProps) {
   const [activeTab, setActiveTab] = useState<'personnel' | 'rates' | 'codes' | 'system'>('personnel');
   const [isSaving, setIsSaving] = useState(false);
+  const { notify, confirm } = useFeedback();
 
   const handleSaveToDrive = async () => {
     if (!systemIds) {
-      alert("System not connected. Please refresh.");
+      notify('error', 'System not connected. Please refresh.');
       return;
     }
     
-    if (!confirm("Save all settings (Personnel, Rates, Config) to Google Drive?")) return;
+    const approved = await confirm({
+      title: 'Save System Configuration',
+      message: 'Save all settings (Personnel, Rates, Config) to Google Drive?',
+      confirmLabel: 'Save',
+      cancelLabel: 'Cancel'
+    });
+    if (!approved) return;
 
     setIsSaving(true);
     try {
@@ -37,10 +45,10 @@ export default function Settings({ rates, setRates, employees, setEmployees, con
         saveJsonFile('personnel_master_db.json', { employees, meta: { version: '1.2', updated: new Date() } }, systemIds.configId),
         saveJsonFile('app_config.json', config, systemIds.configId)
       ]);
-      alert("Configuration saved successfully!");
+      notify('success', 'Configuration saved successfully!');
     } catch (err) {
       console.error(err);
-      alert("Failed to save configuration.");
+      notify('error', 'Failed to save configuration.');
     } finally {
       setIsSaving(false);
     }

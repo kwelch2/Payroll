@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import Welcome from './components/Welcome';
 import Layout from './components/Layout';
-import PayrollPage from './components/PayrollPage'; 
+import PayrollPage from './components/PayrollPage';
 import Settings from './components/Settings';
 import Reports from './components/Reports';
+import { FeedbackProvider } from './components/FeedbackProvider';
 import { 
   initGapi, initGis, requestAccessToken, 
   initializeSystem, SystemIds 
@@ -92,40 +93,47 @@ export default function App() {
   };
 
   if (!isAuthenticated) {
-    return <Welcome onLogin={handleLogin} status={authStatus} isReady={gapiReady} />;
+    return (
+      <FeedbackProvider>
+        <Welcome onLogin={handleLogin} status={authStatus} isReady={gapiReady} />
+      </FeedbackProvider>
+    );
   }
 
   return (
-    <Layout 
-      activeTab={activeTab} 
-      onTabChange={setActiveTab} 
-      userEmail="Admin User" 
-      onLogout={handleLogout}
-      systemStatus={systemStatus} // <--- PASSING STATUS HERE
-    >
-      {activeTab === 'payroll' && (
-        <PayrollPage 
-          data={payrollData} 
-          setData={setPayrollData} 
-          employees={employees} 
-          rates={rates} 
-          systemIds={systemIds}
-        />
-      )}
-      
-      {activeTab === 'reports' && <Reports />}
-      
-      {activeTab === 'settings' && (
-        <Settings 
-           rates={rates} 
-           setRates={setRates} 
-           employees={employees} 
-           setEmployees={setEmployees}
-           config={config}
-           setConfig={setConfig}
-           systemIds={systemIds}
-        />
-      )}
-    </Layout>
+    <FeedbackProvider>
+      <Layout 
+        activeTab={activeTab} 
+        onTabChange={setActiveTab} 
+        userEmail="Admin User" 
+        onLogout={handleLogout}
+        systemStatus={systemStatus}
+        authStatus={authStatus}
+      >
+        {activeTab === 'payroll' && (
+          <PayrollPage 
+            data={payrollData} 
+            setData={setPayrollData} 
+            employees={employees} 
+            rates={rates} 
+            systemIds={systemIds}
+          />
+        )}
+        
+        {activeTab === 'reports' && <Reports />}
+        
+        {activeTab === 'settings' && (
+          <Settings 
+             rates={rates} 
+             setRates={setRates} 
+             employees={employees} 
+             setEmployees={setEmployees}
+             config={config}
+             setConfig={setConfig}
+             systemIds={systemIds}
+          />
+        )}
+      </Layout>
+    </FeedbackProvider>
   );
 }

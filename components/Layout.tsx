@@ -1,5 +1,5 @@
 import { ReactNode } from 'react';
-import { LogOut, FileText, Users, Settings as SettingsIcon, Database, CheckCircle, XCircle } from 'lucide-react';
+import { LogOut, FileText, Users, Settings as SettingsIcon } from 'lucide-react';
 
 interface LayoutProps {
   children: ReactNode;
@@ -9,11 +9,18 @@ interface LayoutProps {
   onLogout: () => void;
   // New Prop
   systemStatus: { rates: boolean; employees: boolean; config: boolean; };
+  authStatus: string;
 }
 
-export default function Layout({ children, activeTab, onTabChange, userEmail, onLogout, systemStatus }: LayoutProps) {
+interface NavItemProps {
+  id: string;
+  label: string;
+  icon: React.ComponentType<{ size?: number }>;
+}
+
+export default function Layout({ children, activeTab, onTabChange, userEmail, onLogout, systemStatus, authStatus }: LayoutProps) {
   
-  const NavItem = ({ id, label, icon: Icon }: any) => (
+  const NavItem = ({ id, label, icon: Icon }: NavItemProps) => (
     <button
       onClick={() => onTabChange(id)}
       className={`relative flex items-center gap-2 px-6 py-4 text-sm font-bold transition-all ${activeTab === id ? 'text-blue-600' : 'text-gray-500 hover:text-gray-800 hover:bg-gray-50'}`}
@@ -25,14 +32,27 @@ export default function Layout({ children, activeTab, onTabChange, userEmail, on
   );
 
   const StatusDot = ({ label, active }: { label: string, active: boolean }) => (
-    <div className="flex flex-col items-center group cursor-help">
-      <div className={`w-3 h-3 rounded-full ${active ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-gray-300'}`}></div>
-      {/* Tooltip */}
-      <div className="absolute top-12 opacity-0 group-hover:opacity-100 transition-opacity bg-gray-800 text-white text-[10px] px-2 py-1 rounded whitespace-nowrap z-50 pointer-events-none">
+    <button
+      type="button"
+      className="relative flex flex-col items-center group cursor-help focus:outline-none"
+      aria-label={`${label}: ${active ? 'Loaded' : 'Pending'}`}
+    >
+      <span className={`w-3 h-3 rounded-full ${active ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-gray-300'}`}></span>
+      <span className="absolute top-12 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity bg-gray-800 text-white text-[10px] px-2 py-1 rounded whitespace-nowrap z-50 pointer-events-none">
         {label}: {active ? 'Loaded' : 'Pending'}
-      </div>
-    </div>
+      </span>
+    </button>
   );
+
+  const allLoaded = Object.values(systemStatus).every(Boolean);
+  const statusTone = authStatus.toLowerCase().includes('error')
+    ? 'bg-red-500'
+    : authStatus.toLowerCase().includes('loading') || !allLoaded
+      ? 'bg-amber-500'
+      : 'bg-green-500';
+  const statusLabel = authStatus === 'Online'
+    ? (allLoaded ? 'System Online' : 'Partial Load')
+    : authStatus;
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
@@ -45,8 +65,8 @@ export default function Layout({ children, activeTab, onTabChange, userEmail, on
              <div className="leading-tight">
                <h1 className="font-bold text-gray-900 tracking-tight">Gem Payroll</h1>
                <div className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                  <span className="text-[10px] uppercase font-bold text-gray-400">System Online</span>
+                  <span className={`w-2 h-2 rounded-full ${statusTone} ${statusTone === 'bg-green-500' ? 'animate-pulse' : ''}`}></span>
+                  <span className="text-[10px] uppercase font-bold text-gray-400">{statusLabel}</span>
                </div>
              </div>
           </div>
