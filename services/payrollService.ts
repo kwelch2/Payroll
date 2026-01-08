@@ -1,99 +1,110 @@
-import { Employee, MasterRates, PayrollRow } from '../types';
+import { PayrollRow, Employee, MasterRates } from '../types';
 
 export function calculatePayRow(
-  rawName: string,
-  codeLabel: string,
-  hours: number,
-  employees: Employee[],
+  empName: string, 
+  code: string, 
+  hoursOrQty: number, 
+  employees: Employee[], 
   rates: MasterRates
 ): PayrollRow {
-  const employee = employees.find(e => e.personal.full_name === rawName);
-  const rowId = Math.random().toString(36).substr(2, 9);
   
-  // Basic row structure
-  let row: PayrollRow = {
-    id: rowId,
-    name: rawName,
-    code: codeLabel,
-    hours: hours,
-    rate: 0,
-    total: 0,
-    payLevel: 'Unknown',
-    alert: '',
-    alertLevel: 'info' // Default
-  };
+  // 1. Find the Employee
+  // We match by "Last, First" or "First Last" to be safe, or ID if possible
+  const employee = employees.find(e => {
+    const nameMatches = e.personal.full_name === empName || 
+                        `${e.personal.last_name}, ${e.personal.first_name}` === empName ||
+                        `${e.personal.first_name} ${e.personal.last_name}` === empName;
+    return nameMatches;
+  });
 
+  // Default Object if employee not found
   if (!employee) {
-    row.alert = "Employee Not Found";
-    row.alertLevel = "error";
-    return row;
+    return createEmptyRow(empName, code, hoursOrQty, "Employee not found");
   }
 
-  row.payLevel = employee.classifications.pay_level || 'Unknown';
+  // 2. Determine Rate Strategy
+  let rate = 0;
+  let usedCustomRate = false;
+
+  // STRATEGY A: User Profile Pay Scale (Override)
+  if (employee.payroll_config?.use_user_pay_scale) {
+    const customRate = employee.payroll_config.custom_rates?.[code];
+    
+    // If a custom rate exists (even if 0), use it. 
+    // If it's undefined, it means it wasn't set in their profile.
+    if (customRate !== undefined && customRate !== null) {
+      rate = customRate;
+      usedCustomRate = true;
+    } else {
+      // Fallback: If they are on "User-Pay-Level" but haven't defined a rate for this code,
+      // we default to 0 to prevent accidental matrix inheritance.
+      rate = 0;
+    }
+  } 
   
-  const isHourlyOnly = row.payLevel.toLowerCase() === 'hourly only';
-  const useUserScale = employee.payroll_config.use_user_pay_scale || row.payLevel.toLowerCase() === 'user-pay-level';
-
-  // Find Pay Code definition
-  const defs = rates.pay_codes.definitions;
-  const payCodeDef = defs.find(d => d.label.trim().toLowerCase() === codeLabel.trim().toLowerCase());
-
-  if (!payCodeDef) {
-    if (isHourlyOnly) {
-      row.alert = "Hourly Only (Unmapped Code)";
-    } else {
-      row.alert = `Unknown Code: ${codeLabel}`;
-      row.alertLevel = "error";
-    }
-    return row;
-  }
-
-  // Determine Rate
-  let finalRate: number | null = null;
-
-  if (useUserScale) {
-    // Check custom rates
-    const custom = employee.payroll_config.custom_rates[payCodeDef.code];
-    if (custom !== undefined) {
-      finalRate = custom;
-    } else {
-      row.alert = "Missing Custom Rate";
-      row.alertLevel = "warn";
-    }
-  } else if (!isHourlyOnly) {
-    // Check Master Matrix
-    const levelRates = rates.pay_levels[row.payLevel]?.rates;
-    if (levelRates && levelRates[payCodeDef.code] !== undefined) {
-      finalRate = levelRates[payCodeDef.code];
-    } else {
-      row.alert = `Rate not set for ${row.payLevel}`;
-      row.alertLevel = "warn";
+  // STRATEGY B: Master Matrix Lookup
+  // Only run if we didn't use a custom rate
+  if (!usedCustomRate) {
+    const level = employee.classifications.pay_level || 'Hourly Only';
+    const levelRates = rates.pay_levels[level]?.rates;
+    
+    if (levelRates && levelRates[code] !== undefined) {
+      rate = levelRates[code];
     }
   }
 
-  // Hourly Only logic: Hours track, but Total is 0 unless manually overridden later
-  if (isHourlyOnly) {
-    row.rate = 0;
-    row.total = 0;
-    row.alert = ""; // Clear warnings for hourly only
-    return row;
+  // 3. Calculate Total
+  // Note: For 'Flat' items, hoursOrQty acts as the Quantity.
+  // For 'Hourly' items, it acts as Hours.
+  // The math is the same: Rate * Qty.
+  const total = rate * hoursOrQty;
+
+  // 4. Generate Alert Flags
+  let alert = "";
+  let alertLevel: 'info' | 'warning' | 'error' | undefined = undefined;
+
+  // Check 1: Missing Rate
+  if (rate === 0 && total === 0) {
+    // It's okay for unpaid codes, but flag it just in case
+    alert = "Zero Rate";
+    alertLevel = 'warning';
   }
 
-  row.rate = finalRate;
-
-  // Calculate Total
-  if (finalRate !== null) {
-    if (payCodeDef.type === 'flat') {
-      row.total = finalRate; // Flat rate is per occurrence, assume CSV line is 1 occurrence usually, or if hours column used as qty
-    } else {
-      row.total = finalRate * hours;
-    }
+  // Check 2: Pay Code Existence
+  const def = rates.pay_codes.definitions.find(d => d.label === code || d.code === code);
+  if (!def) {
+    alert = "Unknown Pay Code";
+    alertLevel = 'error';
   }
 
-  return row;
+  return {
+    id: `row-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    name: employee.personal.full_name, // Standardize name
+    payLevel: employee.classifications.pay_level,
+    code: code,
+    hours: hoursOrQty,
+    rate: rate,
+    total: total,
+    alert: alert,
+    alertLevel: alertLevel
+  };
 }
 
-export function getRowColor(codeLabel: string, rates: MasterRates): string {
-  const def = rates.pay_codes.definitions.find(d => d.label === codeLabel);
-  return def ? def.color : '#e2e8f0'; // Default slate-200
+export function getRowColor(code: string, rates: MasterRates): string {
+  const def = rates.pay_codes.definitions.find(d => d.label === code || d.code === code);
+  return def?.color || '#e2e8f0'; // Default gray if not found
+}
+
+function createEmptyRow(name: string, code: string, hours: number, error: string): PayrollRow {
+  return {
+    id: `row-${Date.now()}`,
+    name,
+    payLevel: 'Unknown',
+    code,
+    hours,
+    rate: 0,
+    total: 0,
+    alert: error,
+    alertLevel: 'error'
+  };
 }
