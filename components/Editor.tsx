@@ -23,7 +23,6 @@ interface EditorProps {
 type ViewMode = 'summary' | 'detail';
 type FilterMode = 'all' | 'flagged' | 'standby';
 
-// REMOVED 'systemIds' from the destructured arguments below to fix the warning
 export default function Editor({ data, setData, employees, rates, onSave }: EditorProps) {
   const [editingRow, setEditingRow] = useState<PayrollRow | null>(null);
   const [showPrintWizard, setShowPrintWizard] = useState(false);
@@ -324,7 +323,7 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
 
       {/* Content Area */}
       <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden min-h-[500px]">
-        {/* SUMMARY and DETAIL Views */}
+        {/* SUMMARY View */}
         {viewMode === 'summary' && (
           <div className="divide-y divide-gray-100">
              {groupedData.map((emp) => {
@@ -400,6 +399,8 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
                                        <th className="py-2 font-normal text-right">Hrs/Qty</th>
                                        <th className="py-2 font-normal text-right">Rate</th>
                                        <th className="py-2 font-normal text-right">Total</th>
+                                       {/* ADDED FLAGS HEADER */}
+                                       <th className="py-2 font-normal text-center w-24">Flags</th>
                                        <th className="py-2 font-normal text-right">Action</th>
                                      </tr>
                                    </thead>
@@ -413,6 +414,16 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
                                          <td className="py-2 text-right">{row.hours}</td>
                                          <td className="py-2 text-right text-gray-500">{row.manual_rate_override ? `*${row.manual_rate_override}` : row.rate}</td>
                                          <td className="py-2 text-right font-medium">${getEffectiveTotal(row).toFixed(2)}</td>
+                                         
+                                         {/* ADDED FLAGS CELL */}
+                                         <td className="py-2 text-center">
+                                            {row.alert && (
+                                              <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold ${row.alertLevel === 'error' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+                                                <AlertTriangle size={8} /> {row.alert}
+                                              </div>
+                                            )}
+                                         </td>
+
                                          <td className="py-2 text-right">
                                            <button onClick={() => setEditingRow(row)} className="text-blue-600 hover:underline">Edit</button>
                                          </td>
@@ -433,6 +444,7 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
           </div>
         )}
         
+        {/* DETAIL View */}
         {viewMode === 'detail' && (
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
@@ -543,6 +555,7 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
           onSave={handleUpdateRow} 
           onDelete={handleDeleteRow}
           rates={rates}
+          employees={employees} 
         />
       )}
 

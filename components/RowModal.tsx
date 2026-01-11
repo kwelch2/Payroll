@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { PayrollRow, MasterRates } from '../types';
+import { useEffect, useRef, useState } from 'react';
+import { PayrollRow, MasterRates, Employee } from '../types';
 import { X, Trash2, Calendar, Clock } from 'lucide-react';
 
 interface RowModalProps {
@@ -8,8 +8,10 @@ interface RowModalProps {
   onSave: (row: PayrollRow) => void;
   onDelete: (id: string) => void;
   rates: MasterRates;
+  employees: Employee[]; 
 }
 
+// Removed 'employees' from destructuring to fix the warning
 export default function RowModal({ row, onClose, onSave, onDelete, rates }: RowModalProps) {
   const [form, setForm] = useState<PayrollRow>({ ...row });
   const modalRef = useRef<HTMLDivElement>(null);
