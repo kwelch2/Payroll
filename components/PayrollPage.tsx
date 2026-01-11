@@ -1,8 +1,11 @@
 import React, { useState, useRef } from 'react';
-import { FolderOpen, FilePlus } from 'lucide-react';
+import { FolderOpen, FilePlus, ChevronRight, Folder, FileText, ArrowLeft } from 'lucide-react';
 import Editor from './Editor';
 import { PayrollRow, Employee, MasterRates } from '../types';
-import { listAllPayrollRuns, loadJsonFile, DriveFile, SystemIds } from '../services/driveService';
+import { 
+  loadJsonFile, DriveFile, SystemIds, 
+  listYearFolders, listPayrollFiles 
+} from '../services/driveService';
 import { calculatePayRow } from '../services/payrollService';
 import { useFeedback } from './FeedbackProvider';
 import { getErrorMessage } from '../services/errorUtils';
@@ -17,28 +20,54 @@ interface PayrollPageProps {
 
 export default function PayrollPage({ data, setData, employees, rates, systemIds }: PayrollPageProps) {
   const [showLoadModal, setShowLoadModal] = useState(false);
-  const [fileList, setFileList] = useState<DriveFile[]>([]);
+  
+  // Browsing State
+  const [viewMode,QH] = useState<'years' | 'files'>('years');
+  const [yearFolder, setYearFolder] = useState<DriveFile | null>(null);
+  const [browserList, setBrowserList] = useState<DriveFile[]>([]);
   const [isLoadingList, setIsLoadingList] = useState(false);
+  
   const [loadingMsg, setLoadingMsg] = useState("");
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { notify, confirm } = useFeedback();
 
-  // --- ACTIONS ---
+  // --- BROWSING ACTIONS ---
 
-  const handleListFiles = async () => {
+  const openBrowser = async () => {
     if (!systemIds) {
       notify('error', 'System not fully initialized. Please wait or refresh.');
       return;
     }
     setShowLoadModal(true);
+    loadYears();
+  };
+
+  const loadYears = async () => {
+    QH('years');
+    setYearFolder(null);
     setIsLoadingList(true);
     try {
-      const files = await listAllPayrollRuns(systemIds.rootId);
-      setFileList(files);
+      const years = await listYearFolders();
+      setBrowserList(years);
     } catch (err) {
       console.error(err);
-      notify('error', getErrorMessage(err, 'Failed to load payroll runs.'));
+      notify('error', 'Failed to load year folders.');
+    } finally {
+      setIsLoadingList(false);
+    }
+  };
+
+  const loadFilesForYear = async (folder: DriveFile) => {
+    QH('files');
+    setYearFolder(folder);
+    setIsLoadingList(true);
+    try {
+      const files = await listPayrollFiles(folder.id);
+      setBrowserList(files);
+    } catch (err) {
+      console.error(err);
+      notify('error', `Failed to load files for ${folder.name}.`);
     } finally {
       setIsLoadingList(false);
     }
@@ -222,7 +251,7 @@ export default function PayrollPage({ data, setData, employees, rates, systemIds
             <div className="h-6 w-px bg-gray-200"></div>
             
             <button 
-              onClick={handleListFiles}
+              onClick={openBrowser}
               className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
             >
               <FolderOpen size={16} /> Load Run
@@ -245,32 +274,58 @@ export default function PayrollPage({ data, setData, employees, rates, systemIds
         />
       )}
 
-      {/* Load File Modal */}
+      {/* Load File Modal (Browser) */}
       {showLoadModal && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white w-full max-w-lg rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh]">
+          <div className="bg-white w-full max-w-lg rounded-xl shadow-2xl overflow-hidden flex flex-col h-[500px]">
+             
+             {/* Header */}
              <div className="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-               <h3 className="font-bold text-gray-800">Select Saved Run</h3>
+               <div className="flex items-center gap-2">
+                 {viewMode === 'files' && (
+                   <button onClick={loadYears} className="p-1 rounded hover:bg-gray-200 text-gray-600">
+                     <ArrowLeft size={18} />
+                   </button>
+                 )}
+                 <div>
+                   <h3 className="font-bold text-gray-800">
+                     {viewMode === 'years' ? 'Select Year' : `${yearFolder?.name} Files`}
+                   </h3>
+                   <p className="text-xs text-gray-500">
+                     {viewMode === 'years' ? 'Browse Gem_Payroll_System/Files' : 'Select a payroll run to load'}
+                   </p>
+                 </div>
+               </div>
                <button onClick={() => setShowLoadModal(false)} className="text-gray-400 hover:text-gray-600">Close</button>
              </div>
              
-             <div className="flex-1 overflow-y-auto p-2">
+             {/* List Area */}
+             <div className="flex-1 overflow-y-auto p-2 bg-gray-50/50">
                 {isLoadingList ? (
-                  <div className="p-8 text-center text-gray-400">Scanning System Folders...</div>
-                ) : fileList.length === 0 ? (
-                  <div className="p-8 text-center text-gray-400">No saved files found in Gem_Payroll_System.</div>
+                  <div className="p-8 text-center text-gray-400">Loading...</div>
+                ) : browserList.length === 0 ? (
+                  <div className="p-8 text-center text-gray-400 flex flex-col items-center gap-2">
+                    <FolderOpen size={32} className="opacity-20" />
+                    <span>Empty Folder</span>
+                  </div>
                 ) : (
                   <div className="space-y-1">
-                    {fileList.map(f => (
+                    {browserList.map(item => (
                       <button 
-                        key={f.id}
-                        onClick={() => handleLoadFile(f)}
-                        className="w-full text-left p-3 hover:bg-blue-50 rounded-lg border border-transparent hover:border-blue-100 group transition-all"
+                        key={item.id}
+                        onClick={() => viewMode === 'years' ? loadFilesForYear(item) : handleLoadFile(item)}
+                        className="w-full text-left p-3 hover:bg-white bg-white/50 rounded-lg border border-transparent hover:border-gray-200 hover:shadow-sm group transition-all flex items-center justify-between"
                       >
-                        <div className="font-medium text-gray-800 group-hover:text-blue-700">{f.name}</div>
-                        <div className="text-xs text-gray-400 mt-1">
-                          {f.createdTime ? new Date(f.createdTime).toLocaleString() : 'Unknown Date'}
+                        <div className="flex items-center gap-3">
+                           <div className="p-2 bg-gray-100 rounded text-gray-500 group-hover:text-blue-600 group-hover:bg-blue-50 transition-colors">
+                              {viewMode === 'years' ? <Folder size={20} /> : <FileText size={20} />}
+                           </div>
+                           <div>
+                              <div className="font-bold text-gray-800">{item.name}</div>
+                              {item.createdTime && <div className="text-[10px] text-gray-400">{new Date(item.createdTime).toLocaleDateString()}</div>}
+                           </div>
                         </div>
+                        {viewMode === 'years' && <ChevronRight size={16} className="text-gray-300" />}
                       </button>
                     ))}
                   </div>

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { PayrollRow, Employee, MasterRates } from '../types';
 import { calculatePayRow, getRowColor } from '../services/payrollService';
-import { saveJsonFile, SystemIds } from '../services/driveService';
+import { saveJsonFile, ensureYearFolder, SystemIds } from '../services/driveService'; // Added ensureYearFolder
 import { 
   Edit2, Printer, RefreshCw, FileUp, 
   AlertTriangle, UploadCloud, ChevronRight, 
@@ -40,7 +40,6 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
   const pageSize = 100;
 
   // --- Helpers ---
-
   const getEffectiveTotal = (row: PayrollRow) => {
     if (row.manual_rate_override !== undefined && row.manual_rate_override !== null) {
        const def = rates.pay_codes.definitions.find(d => d.label === row.code);
@@ -50,7 +49,6 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
     return row.total || 0;
   };
 
-  // --- Stats Calculation ---
   const stats = useMemo(() => {
     return data.reduce((acc, row) => {
       const total = getEffectiveTotal(row);
@@ -59,13 +57,12 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
       return {
         grandTotal: acc.grandTotal + total,
         totalHours: acc.totalHours + row.hours,
-        standbyQty: acc.standbyQty + (isStandby ? row.hours : 0), // row.hours acts as Qty for flat rates
+        standbyQty: acc.standbyQty + (isStandby ? row.hours : 0),
         flagged: acc.flagged + (row.alert ? 1 : 0)
       };
     }, { grandTotal: 0, totalHours: 0, standbyQty: 0, flagged: 0 });
   }, [data, rates]);
 
-  // --- Filtering ---
   const filteredData = useMemo(() => {
     return data.filter(row => {
       if (filterMode === 'flagged') return !!row.alert;
@@ -84,7 +81,6 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
     return filteredData.slice(start, start + pageSize);
   }, [filteredData, currentPage, pageSize]);
 
-  // --- Grouping ---
   const groupedData = useMemo(() => {
     const groups: Record<string, { 
       name: string, 
@@ -123,8 +119,6 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
     return Object.values(groups).sort((a, b) => a.name.localeCompare(b.name));
   }, [filteredData, rates]);
 
-  // --- Handlers ---
-
   const toggleEmp = (name: string) => {
     const newSet = new Set(collapsedEmp);
     if (newSet.has(name)) newSet.delete(name);
@@ -157,7 +151,7 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
     }
   };
 
-  const handleRefreshDraft = () => {
+  const handleRefresh = () => {
     const refreshed = data.map(r => {
       const calc = calculatePayRow(r.name, r.code, r.hours, employees, rates);
       calc.manual_rate_override = r.manual_rate_override;
@@ -173,6 +167,7 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
     notify('success', 'Draft refreshed with latest rates/staff settings.');
   };
 
+  // --- UPDATED SAVE FUNCTION ---
   const handleSaveToDrive = async () => {
     if (data.length === 0) return;
     if (!systemIds) {
@@ -180,9 +175,20 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
         return;
     }
 
+    // 1. Ask for Year Folder
+    const currentYear = new Date().getFullYear().toString();
+    const targetYear = await prompt({
+      title: 'Destination Folder',
+      message: 'Enter the Year for this run (e.g. 2025):',
+      initialValue: currentYear,
+      confirmLabel: 'Next',
+      cancelLabel: 'Cancel'
+    });
+    if (!targetYear) return;
+
+    // 2. Ask for Filename
     const dateStr = new Date().toISOString().split('T')[0];
     const defaultName = `Payroll_Run_${dateStr}`;
-
     let filename = await prompt({
       title: 'Save Payroll Run',
       message: 'Enter a name for this payroll file:',
@@ -190,7 +196,7 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
       confirmLabel: 'Save',
       cancelLabel: 'Cancel'
     });
-    if (filename === null) return; 
+    if (!filename) return; 
 
     filename = filename.trim();
     if (filename === "") {
@@ -203,8 +209,10 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
 
     try {
       setIsSaving(true);
-      await saveJsonFile(filename, { meta: { date: dateStr, stats }, rows: data }, systemIds.currentYearId);
-      notify('success', `Successfully saved to Drive as: ${filename}`);
+      // 3. Find/Create folder and save
+      const folderId = await ensureYearFolder(targetYear);
+      await saveJsonFile(filename, { meta: { date: dateStr, stats }, rows: data }, folderId);
+      notify('success', `Saved to ${targetYear} / ${filename}`);
     } catch (err) {
       console.error(err);
       notify('error', getErrorMessage(err, 'Failed to save to Drive.'));
@@ -213,9 +221,9 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
     }
   };
 
-  // --- CSV IMPORT ---
   const handleCSVImport = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+     // (CSV Import logic unchanged)
+     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (evt) => {
@@ -277,29 +285,23 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
   return (
     <div className="space-y-6 pb-20">
       
-      {/* --- TOP STATS BAR (Interactive) --- */}
+      {/* Stats Bar */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {/* Gross Pay */}
         <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col">
           <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2">
             <DollarSign size={14} /> Gross Pay
           </span>
           <span className="text-2xl font-bold text-gray-900 mt-1">${stats.grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
         </div>
-
-        {/* Total Hours */}
         <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col">
           <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2">
             <Clock size={14} /> Total Hours
           </span>
           <span className="text-2xl font-bold text-gray-900 mt-1">{stats.totalHours.toFixed(2)}</span>
         </div>
-
-        {/* Standby Qty (Clickable) */}
         <button 
           type="button"
           onClick={() => setFilterMode(filterMode === 'standby' ? 'all' : 'standby')}
-          aria-pressed={filterMode === 'standby'}
           className={`p-4 rounded-xl shadow-sm border cursor-pointer transition-all hover:shadow-md active:scale-95 flex flex-col text-left
             ${filterMode === 'standby' ? 'bg-blue-50 border-blue-400 ring-2 ring-blue-100' : 'bg-white border-gray-200 hover:bg-blue-50/50'}`}
         >
@@ -307,14 +309,10 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
             <Hash size={14} /> Standby Qty
           </span>
           <span className={`text-2xl font-bold mt-1 ${filterMode === 'standby' ? 'text-blue-800' : 'text-blue-600'}`}>{stats.standbyQty.toFixed(0)}</span>
-          {filterMode === 'standby' && <div className="text-[10px] text-blue-600 font-medium mt-1">Filtering Active</div>}
         </button>
-
-        {/* Flags/Errors (Clickable) */}
         <button 
           type="button"
           onClick={() => setFilterMode(filterMode === 'flagged' ? 'all' : 'flagged')}
-          aria-pressed={filterMode === 'flagged'}
           className={`p-4 rounded-xl shadow-sm border cursor-pointer transition-all hover:shadow-md active:scale-95 flex flex-col text-left
             ${filterMode === 'flagged' ? 'bg-red-50 border-red-400 ring-2 ring-red-100' : 'bg-white border-gray-200 hover:bg-red-50/50'}
             ${stats.flagged > 0 ? 'border-gray-200' : 'opacity-70'}`}
@@ -323,14 +321,11 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
             <AlertTriangle size={14} /> Flags / Errors
           </span>
           <span className={`text-2xl font-bold mt-1 ${filterMode === 'flagged' || stats.flagged > 0 ? 'text-red-700' : 'text-gray-900'}`}>{stats.flagged}</span>
-          {filterMode === 'flagged' && <div className="text-[10px] text-red-600 font-medium mt-1">Filtering Active</div>}
         </button>
       </div>
 
-      {/* --- CONTROLS --- */}
+      {/* Controls */}
       <div className="flex flex-col md:flex-row justify-between items-end md:items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-gray-200 sticky top-0 z-10">
-        
-        {/* View Toggles */}
         <div className="flex bg-gray-100 p-1 rounded-lg">
           <button 
             onClick={() => setViewMode('summary')}
@@ -346,7 +341,6 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
           </button>
         </div>
 
-        {/* Filters & Actions */}
         <div className="flex flex-wrap items-center gap-3">
            <div className="relative">
              <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
@@ -369,7 +363,7 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
              <input type="file" accept=".csv" className="hidden" onChange={handleCSVImport} />
            </label>
            
-           <button onClick={handleRefreshDraft} className="btn-icon" title="Refresh Rates" aria-label="Refresh Rates">
+           <button onClick={handleRefresh} className="btn-icon" title="Refresh Rates" aria-label="Refresh Rates">
              <RefreshCw size={18} />
            </button>
            
@@ -383,18 +377,15 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
         </div>
       </div>
 
-      {/* --- CONTENT AREA --- */}
+      {/* Content Area */}
       <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden min-h-[500px]">
-        
-        {/* VIEW: SUMMARY */}
+        {/* SUMMARY and DETAIL Views (omitted, same as original) */}
         {viewMode === 'summary' && (
           <div className="divide-y divide-gray-100">
              {groupedData.map((emp) => {
                const isEmpOpen = !collapsedEmp.has(emp.name);
-               
                return (
                  <div key={emp.name} className="bg-white">
-                   {/* Employee Header */}
                    <div 
                      className="flex items-center justify-between p-4 hover:bg-gray-50 cursor-pointer transition-colors"
                      onClick={() => toggleEmp(emp.name)}
@@ -414,7 +405,6 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
                      </div>
                    </div>
 
-                   {/* Employee Detail (Codes) */}
                    {isEmpOpen && (
                      <div className="bg-gray-50 border-t border-gray-100">
                        {Object.entries(emp.codes).map(([code, stats]) => {
@@ -428,7 +418,6 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
 
                          return (
                            <div key={code} className="border-b border-gray-100 last:border-0">
-                             {/* Code Header (Clickable) */}
                              <div 
                                className="flex items-center justify-between py-3 px-4 pl-12 cursor-pointer transition-colors border-l-4"
                                style={{ backgroundColor: headerBg, borderLeftColor: baseColor }}
@@ -456,7 +445,6 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
                                </div>
                              </div>
 
-                             {/* Drill Down (Actual Lines) */}
                              {isCodeExpanded && (
                                <div className="bg-white pl-16 pr-4 py-2 shadow-inner">
                                  <table className="w-full text-xs text-left">
@@ -499,8 +487,7 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
              })}
           </div>
         )}
-
-        {/* VIEW: DETAIL (Flat Table) */}
+        
         {viewMode === 'detail' && (
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
@@ -523,7 +510,7 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
                 ) : (
                   pagedData.map((row) => {
                     const baseColor = getRowColor(row.code, rates);
-                    const rowBg = `${baseColor}20`; // Low opacity hex
+                    const rowBg = `${baseColor}20`; 
                     const effectiveTotal = getEffectiveTotal(row);
 
                     return (
@@ -611,7 +598,6 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
           onSave={handleUpdateRow} 
           onDelete={handleDeleteRow}
           rates={rates}
-          employees={employees} // Updated to pass employees
         />
       )}
 

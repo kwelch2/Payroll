@@ -2,7 +2,7 @@ import { INITIAL_RATES, INITIAL_EMPLOYEES, INITIAL_CONFIG } from '../constants';
 
 // --- CONFIGURATION ---
 const HARDCODED_ROOT_ID = "1MYPXAh9-juU58I403toaS3CqigObEjKn"; 
-
+const FILES_ROOT_ID = "1C_Tyg-jAW7lT9UnkIGrYmhuftqcczZK7"; // <--- The specific Files folder
 
 const API_KEY = import.meta.env.VITE_GOOGLE_API_KEY;
 const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID;
@@ -71,7 +71,6 @@ export interface SystemIds {
 export async function initializeSystem(): Promise<{ ids: SystemIds, data: any }> {
   
   // 1. Use the Hardcoded ID directly
-  // This solves the "Ghost Folder" issue
   const rootId = HARDCODED_ROOT_ID;
   
   // Safety check: verify we can access this folder
@@ -86,6 +85,7 @@ export async function initializeSystem(): Promise<{ ids: SystemIds, data: any }>
   let configId = await findFile("00_Config", 'application/vnd.google-apps.folder', rootId);
   if (!configId) configId = await createFolder("00_Config", rootId);
 
+  // Default "Current Year" folder logic (Legacy support, but we mostly use FILES_ROOT_ID now)
   const year = new Date().getFullYear();
   const yearFolderName = `${year}_Payroll`;
   let yearFolderId = await findFile(yearFolderName, 'application/vnd.google-apps.folder', rootId);
@@ -94,7 +94,6 @@ export async function initializeSystem(): Promise<{ ids: SystemIds, data: any }>
   const ids = { rootId, configId, currentYearId: yearFolderId };
 
   // 3. Load Config Files
-  // We use Promise.all to load them in parallel
   const [rates, employees, config] = await Promise.all([
     ensureFile('master_rates.json', ids.configId, INITIAL_RATES),
     ensureFile('personnel_master_db.json', ids.configId, { employees: INITIAL_EMPLOYEES }),
@@ -135,16 +134,59 @@ export async function loadJsonFile(fileId: string) {
   }
 }
 
+// --- FOLDER NAVIGATION (NEW) ---
+
+export async function listYearFolders(): Promise<DriveFile[]> {
+  const q = `mimeType = 'application/vnd.google-apps.folder' and '${FILES_ROOT_ID}' in parents and trashed = false`;
+  try {
+    const response = await window.gapi.client.drive.files.list({
+      q: q,
+      fields: 'files(id, name, createdTime)',
+      orderBy: 'name desc', // Sort years descending (2026, 2025...)
+      pageSize: 50
+    });
+    return response.result.files || [];
+  } catch (err) {
+    console.error("Error listing year folders:", err);
+    return [];
+  }
+}
+
+export async function listPayrollFiles(folderId: string): Promise<DriveFile[]> {
+   // Looking for JSON files inside the specific year folder
+   const q = `mimeType = 'application/json' and '${folderId}' in parents and trashed = false`;
+   try {
+    const response = await window.gapi.client.drive.files.list({
+      q: q,
+      fields: 'files(id, name, createdTime)',
+      orderBy: 'name desc',
+      pageSize: 50
+    });
+    return response.result.files || [];
+  } catch (err) {
+    console.error("Error listing payroll files:", err);
+    return [];
+  }
+}
+
+export async function ensureYearFolder(year: string): Promise<string> {
+  // 1. Check if folder exists inside FILES_ROOT_ID
+  const existingId = await findFile(year, 'application/vnd.google-apps.folder', FILES_ROOT_ID);
+  if (existingId) return existingId;
+
+  // 2. Create if not found
+  console.log(`Creating new Year Folder: ${year}`);
+  return await createFolder(year, FILES_ROOT_ID);
+}
+
+
 // --- HELPERS ---
 
 async function ensureFile(filename: string, parentId: string, defaultContent: any) {
   const existingId = await findFile(filename, 'application/json', parentId);
   if (existingId) {
-    console.log(`Loading existing ${filename}...`);
     return await loadJsonFile(existingId);
   } else {
-    // Only create if it TRULY doesn't exist
-    console.log(`File ${filename} not found. Creating new default...`);
     await saveJsonFile(filename, defaultContent, parentId);
     return defaultContent;
   }
@@ -202,19 +244,9 @@ export async function saveJsonFile(filename: string, content: any, parentId: str
   });
 }
 
+// Keeping this for compatibility if needed, but not used in new flow
 export async function listAllPayrollRuns(_rootId: string): Promise<DriveFile[]> {
-  const q = `name contains 'Payroll_Run' and mimeType = 'application/json' and trashed = false and '${_rootId}' in parents`;
-  try {
-    const response = await window.gapi.client.drive.files.list({
-      q: q,
-      fields: 'files(id, name, createdTime)',
-      orderBy: 'createdTime desc',
-      pageSize: 50
-    });
-    return response.result.files || [];
-  } catch (err) {
-    return [];
-  }
+  return []; 
 }
 
 export interface DriveFile {
