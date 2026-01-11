@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { PayrollRow, Employee, MasterRates } from '../types';
 import { calculatePayRow, getRowColor } from '../services/payrollService';
-import { saveJsonFile, ensureYearFolder, SystemIds } from '../services/driveService'; // Added ensureYearFolder
+import { SystemIds } from '../services/driveService'; 
 import { 
   Edit2, Printer, RefreshCw, FileUp, 
   AlertTriangle, UploadCloud, ChevronRight, 
@@ -10,7 +10,6 @@ import {
 import RowModal from './RowModal';
 import PrintWizard from './PrintWizard';
 import { useFeedback } from './FeedbackProvider';
-import { getErrorMessage } from '../services/errorUtils';
 
 interface EditorProps {
   data: PayrollRow[];
@@ -18,16 +17,17 @@ interface EditorProps {
   employees: Employee[];
   rates: MasterRates;
   systemIds: SystemIds | null;
+  onSave: () => void;
 }
 
 type ViewMode = 'summary' | 'detail';
 type FilterMode = 'all' | 'flagged' | 'standby';
 
-export default function Editor({ data, setData, employees, rates, systemIds }: EditorProps) {
+// REMOVED 'systemIds' from the destructured arguments below to fix the warning
+export default function Editor({ data, setData, employees, rates, onSave }: EditorProps) {
   const [editingRow, setEditingRow] = useState<PayrollRow | null>(null);
   const [showPrintWizard, setShowPrintWizard] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const { notify, confirm, prompt } = useFeedback();
+  const { notify, confirm } = useFeedback();
   
   // Filter States
   const [viewMode, setViewMode] = useState<ViewMode>('summary');
@@ -167,62 +167,7 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
     notify('success', 'Draft refreshed with latest rates/staff settings.');
   };
 
-  // --- UPDATED SAVE FUNCTION ---
-  const handleSaveToDrive = async () => {
-    if (data.length === 0) return;
-    if (!systemIds) {
-        notify('error', 'System connection lost. Please refresh.');
-        return;
-    }
-
-    // 1. Ask for Year Folder
-    const currentYear = new Date().getFullYear().toString();
-    const targetYear = await prompt({
-      title: 'Destination Folder',
-      message: 'Enter the Year for this run (e.g. 2025):',
-      initialValue: currentYear,
-      confirmLabel: 'Next',
-      cancelLabel: 'Cancel'
-    });
-    if (!targetYear) return;
-
-    // 2. Ask for Filename
-    const dateStr = new Date().toISOString().split('T')[0];
-    const defaultName = `Payroll_Run_${dateStr}`;
-    let filename = await prompt({
-      title: 'Save Payroll Run',
-      message: 'Enter a name for this payroll file:',
-      initialValue: defaultName,
-      confirmLabel: 'Save',
-      cancelLabel: 'Cancel'
-    });
-    if (!filename) return; 
-
-    filename = filename.trim();
-    if (filename === "") {
-      notify('error', 'Filename cannot be empty.');
-      return;
-    }
-    if (!filename.toLowerCase().endsWith('.json')) {
-      filename += '.json';
-    }
-
-    try {
-      setIsSaving(true);
-      // 3. Find/Create folder and save
-      const folderId = await ensureYearFolder(targetYear);
-      await saveJsonFile(filename, { meta: { date: dateStr, stats }, rows: data }, folderId);
-      notify('success', `Saved to ${targetYear} / ${filename}`);
-    } catch (err) {
-      console.error(err);
-      notify('error', getErrorMessage(err, 'Failed to save to Drive.'));
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
   const handleCSVImport = (e: React.ChangeEvent<HTMLInputElement>) => {
-     // (CSV Import logic unchanged)
      const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
@@ -367,8 +312,8 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
              <RefreshCw size={18} />
            </button>
            
-           <button onClick={handleSaveToDrive} disabled={isSaving} className={`btn-icon ${isSaving ? 'opacity-50' : ''}`} title="Save to Drive" aria-label="Save to Drive">
-             {isSaving ? <span className="animate-spin text-xs">⏳</span> : <UploadCloud size={18} />}
+           <button onClick={onSave} className="btn-icon" title="Save to Drive" aria-label="Save to Drive">
+             <UploadCloud size={18} />
            </button>
 
            <button onClick={() => setShowPrintWizard(true)} className="btn-primary flex items-center gap-2 bg-gray-900 text-white px-4 py-2 rounded-lg hover:bg-black font-medium shadow-md transition-all ml-2">
@@ -379,7 +324,7 @@ export default function Editor({ data, setData, employees, rates, systemIds }: E
 
       {/* Content Area */}
       <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden min-h-[500px]">
-        {/* SUMMARY and DETAIL Views (omitted, same as original) */}
+        {/* SUMMARY and DETAIL Views */}
         {viewMode === 'summary' && (
           <div className="divide-y divide-gray-100">
              {groupedData.map((emp) => {
