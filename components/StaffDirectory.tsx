@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, UserPlus, Edit2, Trash2, X, User, MapPin, Calendar, Briefcase, DollarSign } from 'lucide-react';
+import { Search, UserPlus, Edit2, Trash2, X, User, DollarSign } from 'lucide-react';
 import { Employee, MasterRates, AppConfig } from '../types';
 import { useFeedback } from './FeedbackProvider';
 
@@ -24,6 +24,7 @@ export default function StaffDirectory({ employees, setEmployees, rates, config 
       classifications: { 
         pay_level: Object.keys(rates.pay_levels)[0] || "Hourly Only", 
         rank: config.ranks[0] || "Firefighter",
+        employment_type: "PRN", // <--- CHANGED: Default is now PRN
         fire_status: config.fire_statuses[0] || "Active",
         ems_cert: "",
         start_date_fire: "",
@@ -137,9 +138,15 @@ export default function StaffDirectory({ employees, setEmployees, rates, config 
                       </td>
                       <td className="p-4">
                          <div className="text-sm font-medium text-gray-700">{emp.classifications.rank}</div>
-                         <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${emp.status === 'Active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                           {emp.status}
-                         </span>
+                         <div className="flex gap-2 mt-1">
+                            <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${emp.status === 'Active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                              {emp.status}
+                            </span>
+                            {/* Added PRN/Full Time Pill */}
+                            <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
+                              {emp.classifications.employment_type || 'PRN'}
+                            </span>
+                         </div>
                       </td>
                       <td className="p-4">
                          <div className="flex flex-col gap-1 items-start">
@@ -273,6 +280,20 @@ export default function StaffDirectory({ employees, setEmployees, rates, config 
                         {(config.ranks || []).map(r => <option key={r} value={r}>{r}</option>)}
                      </select>
                    </div>
+                   
+                   {/* ADDED: Employment Type Selector */}
+                   <div className="col-span-2">
+                     <label className="label">Employment Type</label>
+                     <select 
+                       className="input-std bg-blue-50/50 border-blue-200 text-blue-800 font-medium" 
+                       value={fullEditEmp.classifications.employment_type || 'PRN'} 
+                       onChange={e => updateClass('employment_type', e.target.value)}
+                     >
+                        <option value="PRN">PRN (Part Time)</option>
+                        <option value="Full Time">Full Time</option>
+                     </select>
+                   </div>
+
                    <div className="col-span-2">
                      <label className="label">Fire Status</label>
                      <select className="input-std" value={fullEditEmp.classifications.fire_status || ''} onChange={e => updateClass('fire_status', e.target.value)}>
