@@ -2,14 +2,13 @@ import { PayrollRow, Employee, MasterRates } from '../types';
 
 export function calculatePayRow(
   empName: string, 
-  rawCode: string, // This might be "Shift Pay" (Label) or "shift_pay" (Code)
+  rawCode: string, 
   hoursOrQty: number, 
   employees: Employee[], 
   rates: MasterRates
 ): PayrollRow {
   
   // 1. Find the Employee
-  // Robust matching for "Last, First", "First Last", or exact matches
   const employee = employees.find(e => {
     if (!e.personal) return false;
     const full = e.personal.full_name?.toLowerCase() || "";
@@ -24,9 +23,7 @@ export function calculatePayRow(
     return createEmptyRow(empName, rawCode, hoursOrQty, "Employee not found");
   }
 
-  // 2. Resolve Pay Code (The Fix)
-  // We must convert the CSV label (e.g. "Shift Pay") to the System ID (e.g. "shift_pay")
-  // to look up rates correctly in the database.
+  // 2. Resolve Pay Code
   const def = rates.pay_codes.definitions.find(
     d => d.label.toLowerCase() === rawCode.toLowerCase() || 
          d.code.toLowerCase() === rawCode.toLowerCase()
@@ -36,35 +33,26 @@ export function calculatePayRow(
     return createEmptyRow(empName, rawCode, hoursOrQty, "Unknown Pay Code", 'error');
   }
 
-  const systemCode = def.code; // Use this for lookups (e.g. "shift_pay")
+  const systemCode = def.code; 
 
   // 3. Determine Rate Strategy
   let rate = 0;
   let usedCustomRate = false;
 
-  // STRATEGY A: User Profile Pay Scale (Override)
   if (employee.payroll_config?.use_user_pay_scale) {
     const customRate = employee.payroll_config.custom_rates?.[systemCode];
-    
-    // If a custom rate is explicitly defined (even 0), use it.
     if (customRate !== undefined && customRate !== null) {
       rate = customRate;
       usedCustomRate = true;
     } else {
-      // If the User Profile is active but has NO rate for this code, 
-      // we default to 0 to prevent accidentally inheriting a rate from the standard matrix.
       rate = 0;
       usedCustomRate = true; 
     }
   } 
   
-  // STRATEGY B: Master Matrix Lookup
-  // Only run if we didn't use a custom rate
   if (!usedCustomRate) {
-    // If pay_level is missing, default to 'Hourly Only' to avoid crashing
     const level = employee.classifications.pay_level || 'Hourly Only';
     const levelData = rates.pay_levels[level];
-    
     if (levelData && levelData.rates && levelData.rates[systemCode] !== undefined) {
       rate = levelData.rates[systemCode];
     }
@@ -77,8 +65,10 @@ export function calculatePayRow(
   let alert = "";
   let alertLevel: 'info' | 'warning' | 'error' | undefined = undefined;
 
-  // Warn if rate is 0 (unless it's a known unpaid code if you have those)
-  if (rate === 0 && total === 0) {
+  // CHANGED: Only flag zero rate if NOT Full Time
+  const isFullTime = employee.classifications.employment_type === 'Full Time';
+  
+  if (rate === 0 && total === 0 && !isFullTime) {
     alert = "Zero Rate";
     alertLevel = 'warning';
   }
@@ -87,7 +77,8 @@ export function calculatePayRow(
     id: `row-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
     name: employee.personal.full_name,
     payLevel: employee.classifications.pay_level,
-    code: def.label, // Show the readable Label (e.g. "Shift Pay") in the table
+    employmentType: employee.classifications.employment_type || 'PRN', // Default to PRN if missing
+    code: def.label, 
     hours: hoursOrQty,
     rate: rate,
     total: total,
@@ -109,6 +100,7 @@ function createEmptyRow(name: string, code: string, hours: number, error: string
     id: `row-${Date.now()}-${Math.random()}`,
     name,
     payLevel: 'Unknown',
+    employmentType: 'Unknown',
     code,
     hours,
     rate: 0,

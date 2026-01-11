@@ -26,14 +26,14 @@ export interface MasterRates {
   pay_levels: Record<string, {
     rank: number;
     rates: Record<string, number>;
-    pto_group?: string; // Added to match your data
+    pto_group?: string; 
   }>;
   pto_rules?: Record<string, PTORule>;
 }
 
 export interface Employee {
   id: string;
-  employee_id?: string; // Added
+  employee_id?: string;
   personal: {
     full_name: string;
     first_name: string;
@@ -49,6 +49,7 @@ export interface Employee {
   classifications: {
     pay_level: string;
     rank: string;
+    employment_type?: 'Full Time' | 'PRN'; // <--- ADDED THIS
     officer_rank?: string;
     fire_status?: string;
     ems_cert?: string;
@@ -83,6 +84,7 @@ export interface PayrollRow {
   id: string;
   name: string;
   payLevel: string;
+  employmentType?: string; // <--- ADDED THIS FOR FILTERING
   code: string;
   hours: number;
   rate: number | null;

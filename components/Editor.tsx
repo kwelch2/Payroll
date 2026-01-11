@@ -1,11 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { PayrollRow, Employee, MasterRates } from '../types';
 import { calculatePayRow, getRowColor } from '../services/payrollService';
-import { SystemIds } from '../services/driveService'; 
 import { 
   Edit2, Printer, RefreshCw, FileUp, 
   AlertTriangle, UploadCloud, ChevronRight, 
-  Filter, Clock, DollarSign, Hash 
+  Filter, Clock, DollarSign, Hash, ArrowUpDown, ArrowUp, ArrowDown
 } from 'lucide-react';
 import RowModal from './RowModal';
 import PrintWizard from './PrintWizard';
@@ -16,12 +15,14 @@ interface EditorProps {
   setData: (data: PayrollRow[]) => void;
   employees: Employee[];
   rates: MasterRates;
-  systemIds: SystemIds | null;
-  onSave: () => void;
+  onSave: () => void; // Connects to the parent page's Folder Browser
 }
 
 type ViewMode = 'summary' | 'detail';
 type FilterMode = 'all' | 'flagged' | 'standby';
+type EmploymentFilter = 'all' | 'Full Time' | 'PRN';
+type SortKey = keyof PayrollRow | 'flags';
+type SortDirection = 'asc' | 'desc';
 
 export default function Editor({ data, setData, employees, rates, onSave }: EditorProps) {
   const [editingRow, setEditingRow] = useState<PayrollRow | null>(null);
@@ -31,7 +32,12 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
   // Filter States
   const [viewMode, setViewMode] = useState<ViewMode>('summary');
   const [filterMode, setFilterMode] = useState<FilterMode>('all');
+  const [empFilter, setEmpFilter] = useState<EmploymentFilter>('all');
   
+  // Sort States
+  const [sortKey, setSortKey] = useState<SortKey>('name');
+  const [sortDir, setSortDir] = useState<SortDirection>('asc');
+
   // Accordion States
   const [collapsedEmp, setCollapsedEmp] = useState<Set<string>>(new Set());
   const [expandedCode, setExpandedCode] = useState<Set<string>>(new Set());
@@ -48,8 +54,52 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
     return row.total || 0;
   };
 
+  // --- Filtering & Sorting ---
+  const filteredData = useMemo(() => {
+    let result = data.filter(row => {
+      // 1. Alert/Type Filter
+      if (filterMode === 'flagged' && !row.alert) return false;
+      if (filterMode === 'standby' && !(row.code.toLowerCase().includes('standby') || row.code.toLowerCase().includes('on call'))) return false;
+      
+      // 2. Employment Status Filter
+      if (empFilter !== 'all') {
+         // "PRN" matches "PRN" or missing status
+         if (empFilter === 'PRN') {
+            return row.employmentType === 'PRN' || !row.employmentType;
+         }
+         return row.employmentType === empFilter;
+      }
+      return true;
+    });
+
+    // 3. Sorting
+    return result.sort((a, b) => {
+        let valA: any = a[sortKey as keyof PayrollRow];
+        let valB: any = b[sortKey as keyof PayrollRow];
+
+        // Special handling for calculated/virtual columns
+        if (sortKey === 'total') {
+            valA = getEffectiveTotal(a);
+            valB = getEffectiveTotal(b);
+        }
+        if (sortKey === 'flags') {
+            valA = a.alert || '';
+            valB = b.alert || '';
+        }
+
+        // Handle nulls
+        if (valA === null || valA === undefined) valA = '';
+        if (valB === null || valB === undefined) valB = '';
+
+        if (valA < valB) return sortDir === 'asc' ? -1 : 1;
+        if (valA > valB) return sortDir === 'asc' ? 1 : -1;
+        return 0;
+    });
+  }, [data, filterMode, empFilter, sortKey, sortDir, rates]);
+
+  // --- Stats Calculation ---
   const stats = useMemo(() => {
-    return data.reduce((acc, row) => {
+    return filteredData.reduce((acc, row) => {
       const total = getEffectiveTotal(row);
       const isStandby = row.code.toLowerCase().includes('standby') || row.code.toLowerCase().includes('on call');
       
@@ -60,19 +110,12 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
         flagged: acc.flagged + (row.alert ? 1 : 0)
       };
     }, { grandTotal: 0, totalHours: 0, standbyQty: 0, flagged: 0 });
-  }, [data, rates]);
+  }, [filteredData, rates]); // Use filteredData so stats reflect filters
 
-  const filteredData = useMemo(() => {
-    return data.filter(row => {
-      if (filterMode === 'flagged') return !!row.alert;
-      if (filterMode === 'standby') return row.code.toLowerCase().includes('standby') || row.code.toLowerCase().includes('on call');
-      return true;
-    });
-  }, [data, filterMode]);
-
+  // Reset pagination on filter change
   useEffect(() => {
     setCurrentPage(1);
-  }, [filterMode, filteredData.length]);
+  }, [filterMode, empFilter, data.length]);
 
   const totalPages = Math.max(1, Math.ceil(filteredData.length / pageSize));
   const pagedData = useMemo(() => {
@@ -115,8 +158,19 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
       emp.codes[row.code].rows.push(row);
     });
 
-    return Object.values(groups).sort((a, b) => a.name.localeCompare(b.name));
+    return Object.values(groups); 
   }, [filteredData, rates]);
+
+  // --- Actions ---
+
+  const handleSort = (key: SortKey) => {
+      if (sortKey === key) {
+          setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
+      } else {
+          setSortKey(key);
+          setSortDir('asc');
+      }
+  };
 
   const toggleEmp = (name: string) => {
     const newSet = new Set(collapsedEmp);
@@ -153,6 +207,7 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
   const handleRefresh = () => {
     const refreshed = data.map(r => {
       const calc = calculatePayRow(r.name, r.code, r.hours, employees, rates);
+      // Preserve manual edits
       calc.manual_rate_override = r.manual_rate_override;
       calc.manual_note = r.manual_note;
       calc.id = r.id;
@@ -163,12 +218,13 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
       return calc;
     });
     setData(refreshed);
-    notify('success', 'Draft refreshed with latest rates/staff settings.');
+    notify('success', 'Draft refreshed. Full Time "Zero Rate" errors suppressed.');
   };
 
   const handleCSVImport = (e: React.ChangeEvent<HTMLInputElement>) => {
-     const file = e.target.files?.[0];
+    const file = e.target.files?.[0];
     if (!file) return;
+    
     const reader = new FileReader();
     reader.onload = (evt) => {
       const text = evt.target?.result as string;
@@ -191,18 +247,18 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
       for (let i = headerIndex + 1; i < lines.length; i++) {
         const line = lines[i].trim();
         if (!line) continue;
-        const cols = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
-        const cleanCols = cols.map(c => c.replace(/^"|"$/g, '').trim());
-        if (cleanCols.length < 10) continue;
+        const cols = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(c => c.replace(/^"|"$/g, '').trim());
+        
+        if (cols.length < 10) continue;
 
-        const lastName = cleanCols[0];
-        const firstName = cleanCols[1];
-        const startDate = cleanCols[5];
-        const startTime = cleanCols[6];
-        const endDate = cleanCols[7];
-        const endTime = cleanCols[8];
-        const payCode = cleanCols[9];
-        const hours = parseFloat(cleanCols[10]);
+        const lastName = cols[0];
+        const firstName = cols[1];
+        const startDate = cols[5];
+        const startTime = cols[6];
+        const endDate = cols[7];
+        const endTime = cols[8];
+        const payCode = cols[9];
+        const hours = parseFloat(cols[10]);
 
         if (payCode && !isNaN(hours)) {
            const fullName = `${lastName}, ${firstName}`;
@@ -226,44 +282,30 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
     e.target.value = '';
   };
 
+  const SortIcon = ({ col }: { col: SortKey }) => {
+      if (sortKey !== col) return <ArrowUpDown size={12} className="opacity-20 ml-1 inline" />;
+      return sortDir === 'asc' ? <ArrowUp size={12} className="ml-1 text-blue-600 inline" /> : <ArrowDown size={12} className="ml-1 text-blue-600 inline" />;
+  };
+
   return (
     <div className="space-y-6 pb-20">
       
       {/* Stats Bar */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col">
-          <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2">
-            <DollarSign size={14} /> Gross Pay
-          </span>
+          <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2"><DollarSign size={14} /> Gross Pay</span>
           <span className="text-2xl font-bold text-gray-900 mt-1">${stats.grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
         </div>
         <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col">
-          <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2">
-            <Clock size={14} /> Total Hours
-          </span>
+          <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2"><Clock size={14} /> Total Hours</span>
           <span className="text-2xl font-bold text-gray-900 mt-1">{stats.totalHours.toFixed(2)}</span>
         </div>
-        <button 
-          type="button"
-          onClick={() => setFilterMode(filterMode === 'standby' ? 'all' : 'standby')}
-          className={`p-4 rounded-xl shadow-sm border cursor-pointer transition-all hover:shadow-md active:scale-95 flex flex-col text-left
-            ${filterMode === 'standby' ? 'bg-blue-50 border-blue-400 ring-2 ring-blue-100' : 'bg-white border-gray-200 hover:bg-blue-50/50'}`}
-        >
-          <span className={`text-xs font-bold uppercase tracking-wider flex items-center gap-2 ${filterMode === 'standby' ? 'text-blue-700' : 'text-gray-400'}`}>
-            <Hash size={14} /> Standby Qty
-          </span>
+        <button type="button" onClick={() => setFilterMode(filterMode === 'standby' ? 'all' : 'standby')} className={`p-4 rounded-xl shadow-sm border text-left ${filterMode === 'standby' ? 'bg-blue-50 border-blue-400 ring-2 ring-blue-100' : 'bg-white border-gray-200'}`}>
+          <span className={`text-xs font-bold uppercase tracking-wider flex items-center gap-2 ${filterMode === 'standby' ? 'text-blue-700' : 'text-gray-400'}`}><Hash size={14} /> Standby Qty</span>
           <span className={`text-2xl font-bold mt-1 ${filterMode === 'standby' ? 'text-blue-800' : 'text-blue-600'}`}>{stats.standbyQty.toFixed(0)}</span>
         </button>
-        <button 
-          type="button"
-          onClick={() => setFilterMode(filterMode === 'flagged' ? 'all' : 'flagged')}
-          className={`p-4 rounded-xl shadow-sm border cursor-pointer transition-all hover:shadow-md active:scale-95 flex flex-col text-left
-            ${filterMode === 'flagged' ? 'bg-red-50 border-red-400 ring-2 ring-red-100' : 'bg-white border-gray-200 hover:bg-red-50/50'}
-            ${stats.flagged > 0 ? 'border-gray-200' : 'opacity-70'}`}
-        >
-          <span className={`text-xs font-bold uppercase tracking-wider flex items-center gap-2 ${filterMode === 'flagged' || stats.flagged > 0 ? 'text-red-600' : 'text-gray-400'}`}>
-            <AlertTriangle size={14} /> Flags / Errors
-          </span>
+        <button type="button" onClick={() => setFilterMode(filterMode === 'flagged' ? 'all' : 'flagged')} className={`p-4 rounded-xl shadow-sm border text-left ${filterMode === 'flagged' ? 'bg-red-50 border-red-400 ring-2 ring-red-100' : 'bg-white border-gray-200'}`}>
+          <span className={`text-xs font-bold uppercase tracking-wider flex items-center gap-2 ${filterMode === 'flagged' || stats.flagged > 0 ? 'text-red-600' : 'text-gray-400'}`}><AlertTriangle size={14} /> Flags / Errors</span>
           <span className={`text-2xl font-bold mt-1 ${filterMode === 'flagged' || stats.flagged > 0 ? 'text-red-700' : 'text-gray-900'}`}>{stats.flagged}</span>
         </button>
       </div>
@@ -271,52 +313,49 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
       {/* Controls */}
       <div className="flex flex-col md:flex-row justify-between items-end md:items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-gray-200 sticky top-0 z-10">
         <div className="flex bg-gray-100 p-1 rounded-lg">
-          <button 
-            onClick={() => setViewMode('summary')}
-            className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${viewMode === 'summary' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-          >
-            Summary View
-          </button>
-          <button 
-            onClick={() => setViewMode('detail')}
-            className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${viewMode === 'detail' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-          >
-            Detailed Log
-          </button>
+          <button onClick={() => setViewMode('summary')} className={`px-4 py-2 rounded-md text-sm font-medium ${viewMode === 'summary' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Summary</button>
+          <button onClick={() => setViewMode('detail')} className={`px-4 py-2 rounded-md text-sm font-medium ${viewMode === 'detail' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Detailed</button>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
+           {/* Employment Filter */}
+           <div className="relative">
+             <select 
+                className="pl-3 pr-8 py-2 border rounded-lg text-sm bg-gray-50 border-gray-200 focus:ring-2 focus:ring-blue-500 font-medium cursor-pointer outline-none"
+                value={empFilter}
+                onChange={(e) => setEmpFilter(e.target.value as EmploymentFilter)}
+             >
+                <option value="all">All Staff</option>
+                <option value="Full Time">Full Time</option>
+                <option value="PRN">PRN</option>
+             </select>
+           </div>
+
+           {/* Type Filter */}
            <div className="relative">
              <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
              <select 
-               className={`pl-10 pr-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none appearance-none cursor-pointer font-medium
-                 ${filterMode !== 'all' ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-gray-50 border-gray-200'}`}
+               className={`pl-10 pr-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 font-medium cursor-pointer outline-none ${filterMode !== 'all' ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-gray-50 border-gray-200'}`}
                value={filterMode}
                onChange={(e) => setFilterMode(e.target.value as FilterMode)}
              >
                <option value="all">Show All Items</option>
-               <option value="flagged">⚠️ Errors & Flags Only</option>
-               <option value="standby">🕰️ Standby/On-Call Only</option>
+               <option value="flagged">⚠️ Errors Only</option>
+               <option value="standby">🕰️ Standby Only</option>
              </select>
            </div>
 
            <div className="h-6 w-px bg-gray-300 mx-1"></div>
 
-           <label className="btn-icon" title="Import CSV" aria-label="Import CSV">
+           <label className="btn-icon" title="Import CSV">
              <FileUp size={18} />
              <input type="file" accept=".csv" className="hidden" onChange={handleCSVImport} />
            </label>
            
-           <button onClick={handleRefresh} className="btn-icon" title="Refresh Rates" aria-label="Refresh Rates">
-             <RefreshCw size={18} />
-           </button>
-           
-           <button onClick={onSave} className="btn-icon" title="Save to Drive" aria-label="Save to Drive">
-             <UploadCloud size={18} />
-           </button>
-
+           <button onClick={handleRefresh} className="btn-icon" title="Refresh Rates"><RefreshCw size={18} /></button>
+           <button onClick={onSave} className="btn-icon" title="Save to Drive"><UploadCloud size={18} /></button>
            <button onClick={() => setShowPrintWizard(true)} className="btn-primary flex items-center gap-2 bg-gray-900 text-white px-4 py-2 rounded-lg hover:bg-black font-medium shadow-md transition-all ml-2">
-             <Printer size={18} /> <span className="hidden sm:inline">Finalize</span>
+             <Printer size={18} /> Finalize
            </button>
         </div>
       </div>
@@ -330,14 +369,9 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
                const isEmpOpen = !collapsedEmp.has(emp.name);
                return (
                  <div key={emp.name} className="bg-white">
-                   <div 
-                     className="flex items-center justify-between p-4 hover:bg-gray-50 cursor-pointer transition-colors"
-                     onClick={() => toggleEmp(emp.name)}
-                   >
+                   <div className="flex items-center justify-between p-4 hover:bg-gray-50 cursor-pointer transition-colors" onClick={() => toggleEmp(emp.name)}>
                      <div className="flex items-center gap-3">
-                       <div className={`p-1 rounded-full transition-transform ${isEmpOpen ? 'rotate-90 bg-blue-100 text-blue-600' : 'text-gray-400'}`}>
-                         <ChevronRight size={18} />
-                       </div>
+                       <div className={`p-1 rounded-full transition-transform ${isEmpOpen ? 'rotate-90 bg-blue-100 text-blue-600' : 'text-gray-400'}`}><ChevronRight size={18} /></div>
                        <div>
                          <h3 className="font-bold text-gray-800 text-lg">{emp.name}</h3>
                          <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">{emp.payLevel}</span>
@@ -354,7 +388,6 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
                        {Object.entries(emp.codes).map(([code, stats]) => {
                          const codeId = `${emp.name}-${code}`;
                          const isCodeExpanded = expandedCode.has(codeId);
-                         
                          const def = rates.pay_codes.definitions.find(d => d.label === code);
                          const baseColor = def ? def.color : '#e2e8f0';
                          const headerBg = `${baseColor}25`;
@@ -362,29 +395,13 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
 
                          return (
                            <div key={code} className="border-b border-gray-100 last:border-0">
-                             <div 
-                               className="flex items-center justify-between py-3 px-4 pl-12 cursor-pointer transition-colors border-l-4"
-                               style={{ backgroundColor: headerBg, borderLeftColor: baseColor }}
-                               onClick={() => toggleCode(codeId)}
-                             >
+                             <div className="flex items-center justify-between py-3 px-4 pl-12 cursor-pointer transition-colors border-l-4" style={{ backgroundColor: headerBg, borderLeftColor: baseColor }} onClick={() => toggleCode(codeId)}>
                                <div className="flex items-center gap-2">
-                                  <div className={`transition-transform ${isCodeExpanded ? 'rotate-90 text-gray-700' : 'text-gray-500'}`}>
-                                    <ChevronRight size={14} />
-                                  </div>
+                                  <div className={`transition-transform ${isCodeExpanded ? 'rotate-90 text-gray-700' : 'text-gray-500'}`}><ChevronRight size={14} /></div>
                                   <span className="font-bold text-gray-800">{code}</span>
-                                  <span className="text-xs text-gray-600 opacity-70 ml-2">
-                                    {isFlatRate 
-                                      ? `(${stats.totalHours.toFixed(2)} qty)` 
-                                      : `(${stats.totalHours.toFixed(2)} hrs)`}
-                                  </span>
+                                  <span className="text-xs text-gray-600 opacity-70 ml-2">{isFlatRate ? `(${stats.totalHours.toFixed(2)} qty)` : `(${stats.totalHours.toFixed(2)} hrs)`}</span>
                                </div>
-
                                <div className="text-right flex gap-6 text-sm">
-                                  <span className="w-24 text-gray-800 font-medium text-right">
-                                    {isFlatRate 
-                                      ? `${stats.rows.length} Qty` 
-                                      : `${stats.totalHours.toFixed(2)} hrs`}
-                                  </span>
                                   <span className="w-24 font-mono font-bold text-gray-900">${stats.totalPay.toFixed(2)}</span>
                                </div>
                              </div>
@@ -399,7 +416,6 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
                                        <th className="py-2 font-normal text-right">Hrs/Qty</th>
                                        <th className="py-2 font-normal text-right">Rate</th>
                                        <th className="py-2 font-normal text-right">Total</th>
-                                       {/* ADDED FLAGS HEADER */}
                                        <th className="py-2 font-normal text-center w-24">Flags</th>
                                        <th className="py-2 font-normal text-right">Action</th>
                                      </tr>
@@ -408,22 +424,13 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
                                      {stats.rows.map(row => (
                                        <tr key={row.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50">
                                          <td className="py-2 text-gray-600">{row.startDate || '-'}</td>
-                                         <td className="py-2 text-gray-600 text-[10px]">
-                                            {row.startTime ? `${row.startTime} - ${row.endTime}` : '-'}
-                                         </td>
+                                         <td className="py-2 text-gray-600 text-[10px]">{row.startTime ? `${row.startTime} - ${row.endTime}` : '-'}</td>
                                          <td className="py-2 text-right">{row.hours}</td>
                                          <td className="py-2 text-right text-gray-500">{row.manual_rate_override ? `*${row.manual_rate_override}` : row.rate}</td>
                                          <td className="py-2 text-right font-medium">${getEffectiveTotal(row).toFixed(2)}</td>
-                                         
-                                         {/* ADDED FLAGS CELL */}
                                          <td className="py-2 text-center">
-                                            {row.alert && (
-                                              <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold ${row.alertLevel === 'error' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
-                                                <AlertTriangle size={8} /> {row.alert}
-                                              </div>
-                                            )}
+                                            {row.alert && <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold ${row.alertLevel === 'error' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}><AlertTriangle size={8} /> {row.alert}</div>}
                                          </td>
-
                                          <td className="py-2 text-right">
                                            <button onClick={() => setEditingRow(row)} className="text-blue-600 hover:underline">Edit</button>
                                          </td>
@@ -444,20 +451,20 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
           </div>
         )}
         
-        {/* DETAIL View */}
+        {/* DETAIL View with Sorting */}
         {viewMode === 'detail' && (
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-gray-50 text-gray-600 text-xs uppercase tracking-wider border-b border-gray-200">
-                  <th className="p-4 font-semibold">Employee</th>
-                  <th className="p-4 font-semibold">Pay Code</th>
-                  <th className="p-4 font-semibold">Date</th>
+                  <th className="p-4 font-semibold cursor-pointer hover:bg-gray-100" onClick={() => handleSort('name')}>Employee <SortIcon col="name"/></th>
+                  <th className="p-4 font-semibold cursor-pointer hover:bg-gray-100" onClick={() => handleSort('code')}>Pay Code <SortIcon col="code"/></th>
+                  <th className="p-4 font-semibold cursor-pointer hover:bg-gray-100" onClick={() => handleSort('startDate')}>Date <SortIcon col="startDate"/></th>
                   <th className="p-4 font-semibold">Time</th>
-                  <th className="p-4 font-semibold text-right">Hrs/Qty</th>
-                  <th className="p-4 font-semibold text-right">Rate</th>
-                  <th className="p-4 font-semibold text-right">Total</th>
-                  <th className="p-4 font-semibold text-center">Flags</th>
+                  <th className="p-4 font-semibold text-right cursor-pointer hover:bg-gray-100" onClick={() => handleSort('hours')}>Hrs/Qty <SortIcon col="hours"/></th>
+                  <th className="p-4 font-semibold text-right cursor-pointer hover:bg-gray-100" onClick={() => handleSort('rate')}>Rate <SortIcon col="rate"/></th>
+                  <th className="p-4 font-semibold text-right cursor-pointer hover:bg-gray-100" onClick={() => handleSort('total')}>Total <SortIcon col="total"/></th>
+                  <th className="p-4 font-semibold text-center cursor-pointer hover:bg-gray-100" onClick={() => handleSort('flags')}>Flags <SortIcon col="flags"/></th>
                   <th className="p-4 font-semibold text-center">Action</th>
                 </tr>
               </thead>
@@ -471,47 +478,27 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
                     const effectiveTotal = getEffectiveTotal(row);
 
                     return (
-                      <tr 
-                        key={row.id} 
-                        style={{ backgroundColor: rowBg }}
-                        className="hover:brightness-95 transition-all group border-b border-white"
-                      >
+                      <tr key={row.id} style={{ backgroundColor: rowBg }} className="hover:brightness-95 transition-all group border-b border-white">
                         <td className="p-3">
                           <div className="font-bold text-gray-800 text-sm">{row.name}</div>
-                          <div className="text-xs text-gray-500">{row.payLevel}</div>
+                          <div className="text-xs text-gray-500">{row.payLevel} <span className="opacity-50">({row.employmentType || 'PRN'})</span></div>
                         </td>
                         <td className="p-3">
                           <span className="font-medium text-gray-700 text-sm">{row.code}</span>
                           {row.manual_note && <div className="text-[10px] text-blue-600 mt-0.5">{row.manual_note}</div>}
                         </td>
-                        <td className="p-3 text-sm text-gray-700">
-                          {row.startDate || <span className="text-gray-300">-</span>}
-                        </td>
-                        <td className="p-3 text-xs text-gray-600 font-mono">
-                          {row.startTime ? `${row.startTime} - ${row.endTime}` : <span className="text-gray-300">-</span>}
-                        </td>
+                        <td className="p-3 text-sm text-gray-700">{row.startDate || <span className="text-gray-300">-</span>}</td>
+                        <td className="p-3 text-xs text-gray-600 font-mono">{row.startTime ? `${row.startTime} - ${row.endTime}` : <span className="text-gray-300">-</span>}</td>
                         <td className="p-3 text-right font-mono text-sm">{row.hours.toFixed(2)}</td>
                         <td className="p-3 text-right font-mono text-xs text-gray-500">
-                          {row.manual_rate_override ? (
-                            <span className="bg-yellow-100 text-yellow-800 px-1 rounded font-bold" title="Manual Override">${row.manual_rate_override.toFixed(2)}</span>
-                          ) : (
-                            row.rate !== null ? `$${row.rate.toFixed(2)}` : '-'
-                          )}
+                          {row.manual_rate_override ? <span className="bg-yellow-100 text-yellow-800 px-1 rounded font-bold" title="Manual Override">${row.manual_rate_override.toFixed(2)}</span> : (row.rate !== null ? `$${row.rate.toFixed(2)}` : '-')}
                         </td>
-                        <td className="p-3 text-right font-bold text-gray-800 font-mono text-sm">
-                          ${effectiveTotal.toFixed(2)}
+                        <td className="p-3 text-right font-bold text-gray-800 font-mono text-sm">${effectiveTotal.toFixed(2)}</td>
+                        <td className="p-3 text-center">
+                           {row.alert && <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-bold ${row.alertLevel === 'error' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}><AlertTriangle size={10} /> {row.alert}</div>}
                         </td>
                         <td className="p-3 text-center">
-                           {row.alert && (
-                             <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-bold ${row.alertLevel === 'error' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
-                               <AlertTriangle size={10} /> {row.alert}
-                             </div>
-                           )}
-                        </td>
-                        <td className="p-3 text-center">
-                           <button onClick={() => setEditingRow(row)} className="p-1.5 hover:bg-white rounded text-gray-500 hover:text-blue-600 transition-colors">
-                             <Edit2 size={16} />
-                           </button>
+                           <button onClick={() => setEditingRow(row)} className="p-1.5 hover:bg-white rounded text-gray-500 hover:text-blue-600 transition-colors"><Edit2 size={16} /></button>
                         </td>
                       </tr>
                     );
@@ -521,26 +508,10 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
             </table>
             {filteredData.length > pageSize && (
               <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 text-sm bg-gray-50">
-                <span className="text-gray-500">
-                  Page {currentPage} of {totalPages} • {filteredData.length} rows
-                </span>
+                <span className="text-gray-500">Page {currentPage} of {totalPages} • {filteredData.length} rows</span>
                 <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    className="btn-secondary"
-                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                    disabled={currentPage === 1}
-                  >
-                    Previous
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-secondary"
-                    onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                    disabled={currentPage === totalPages}
-                  >
-                    Next
-                  </button>
+                  <button type="button" className="btn-secondary" onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))} disabled={currentPage === 1}>Previous</button>
+                  <button type="button" className="btn-secondary" onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))} disabled={currentPage === totalPages}>Next</button>
                 </div>
               </div>
             )}
@@ -559,14 +530,7 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
         />
       )}
 
-      {showPrintWizard && (
-        <PrintWizard 
-          data={data}
-          onClose={() => setShowPrintWizard(false)}
-          rates={rates}
-        />
-      )}
-
+      {showPrintWizard && <PrintWizard data={data} onClose={() => setShowPrintWizard(false)} rates={rates} />}
     </div>
   );
 }
