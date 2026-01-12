@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, UserPlus, Edit2, Trash2, X, User, DollarSign } from 'lucide-react';
+import { Search, UserPlus, Edit2, Trash2, X, User, DollarSign, Calendar, MapPin, Briefcase } from 'lucide-react';
 import { Employee, MasterRates, AppConfig } from '../types';
 import { useFeedback } from './FeedbackProvider';
 
@@ -24,7 +24,8 @@ export default function StaffDirectory({ employees, setEmployees, rates, config 
       classifications: { 
         pay_level: Object.keys(rates.pay_levels)[0] || "Hourly Only", 
         rank: config.ranks[0] || "Firefighter",
-        employment_type: "PRN", // <--- CHANGED: Default is now PRN
+        employment_type: "PRN", // Default PRN
+        shift_schedule: '12-Hour', // Default Shift
         fire_status: config.fire_statuses[0] || "Active",
         ems_cert: "",
         start_date_fire: "",
@@ -32,6 +33,7 @@ export default function StaffDirectory({ employees, setEmployees, rates, config 
       },
       status: "Active",
       payroll_config: { use_user_pay_scale: false, custom_rates: {} },
+      leave_bank: { vacation_balance: 0, personal_balance: 0, history: [] }, // Init Leave Bank
       address: { line1: "", line2: "", city: "", state: "", zip: "" },
       contact: { phone: "", email: "", carrier: "" }
     };
@@ -46,13 +48,7 @@ export default function StaffDirectory({ employees, setEmployees, rates, config 
   };
 
   const handleDelete = async (id: string) => {
-    const approved = await confirm({
-      title: 'Delete Employee',
-      message: 'Delete this employee?',
-      confirmLabel: 'Delete',
-      cancelLabel: 'Cancel'
-    });
-    if (approved) {
+    if (await confirm({ title: 'Delete Employee', message: 'Delete this employee?', confirmLabel: 'Delete' })) {
       setEmployees(employees.filter(e => e.id !== id));
     }
   };
@@ -62,21 +58,20 @@ export default function StaffDirectory({ employees, setEmployees, rates, config 
     (e.employee_id && e.employee_id.includes(search))
   );
 
-  // Helper to safely update state
+  // --- HELPERS ---
   const updateEmp = (section: keyof Employee, field: string, value: any) => {
     if (!fullEditEmp) return;
-    setFullEditEmp({
-      ...fullEditEmp,
-      [section]: {
-        ...(fullEditEmp[section] as any),
-        [field]: value
-      }
+    setFullEditEmp({ 
+      ...fullEditEmp, 
+      [section]: { 
+        ...(fullEditEmp[section] as any), 
+        [field]: value 
+      } 
     });
   };
 
   const updateClass = (field: string, value: any) => updateEmp('classifications', field, value);
 
-  // Helper for Custom Rates
   const updateCustomRate = (code: string, value: string) => {
     if (!fullEditEmp) return;
     const num = parseFloat(value);
@@ -102,17 +97,15 @@ export default function StaffDirectory({ employees, setEmployees, rates, config 
       {/* Toolbar */}
       <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50 sticky top-0 z-10">
          <div className="relative">
-            <label htmlFor="staff-search" className="sr-only">Search personnel</label>
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
             <input 
-              id="staff-search"
-              className="pl-9 pr-4 py-2 bg-white border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none w-64 shadow-sm" 
-              placeholder="Search personnel..."
-              value={search}
-              onChange={e => setSearch(e.target.value)}
+              className="pl-9 pr-4 py-2 bg-white border border-gray-300 rounded-lg text-sm w-64 shadow-sm focus:ring-2 focus:ring-blue-500 outline-none" 
+              placeholder="Search personnel..." 
+              value={search} 
+              onChange={e => setSearch(e.target.value)} 
             />
          </div>
-         <button onClick={handleAdd} className="btn-primary flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-bold shadow-sm">
+         <button onClick={handleAdd} className="btn-primary flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-bold shadow-sm transition-colors">
             <UserPlus size={16} /> Add Employee
          </button>
       </div>
@@ -142,7 +135,6 @@ export default function StaffDirectory({ employees, setEmployees, rates, config 
                             <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${emp.status === 'Active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
                               {emp.status}
                             </span>
-                            {/* Added PRN/Full Time Pill */}
                             <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
                               {emp.classifications.employment_type || 'PRN'}
                             </span>
@@ -158,10 +150,10 @@ export default function StaffDirectory({ employees, setEmployees, rates, config 
                       </td>
                       <td className="p-4 text-right">
                          <div className="flex justify-end gap-2">
-                            <button onClick={() => setFullEditEmp(emp)} className="p-2 rounded-lg bg-white border border-gray-200 text-gray-600 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all shadow-sm" aria-label={`Edit ${emp.personal.full_name}`}>
+                            <button onClick={() => setFullEditEmp(emp)} className="p-2 rounded-lg bg-white border border-gray-200 text-gray-600 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition-all shadow-sm">
                                <Edit2 size={16} />
                             </button>
-                            <button onClick={() => handleDelete(emp.id)} className="p-2 rounded-lg bg-white border border-gray-200 text-red-500 hover:bg-red-50 hover:border-red-200 transition-all shadow-sm" aria-label={`Delete ${emp.personal.full_name}`}>
+                            <button onClick={() => handleDelete(emp.id)} className="p-2 rounded-lg bg-white border border-gray-200 text-red-500 hover:bg-red-50 hover:border-red-200 transition-all shadow-sm">
                                <Trash2 size={16} />
                             </button>
                          </div>
@@ -175,11 +167,11 @@ export default function StaffDirectory({ employees, setEmployees, rates, config 
 
       {/* FULL EDIT MODAL */}
       {fullEditEmp && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-          <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden border border-gray-200 animate-in fade-in zoom-in-95 duration-200">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden border border-gray-200">
             
             {/* Header */}
-            <div className="p-5 border-b border-gray-200 flex justify-between items-center bg-gray-50">
+            <div className="p-5 border-b border-gray-200 flex justify-between items-center bg-gray-50 shrink-0">
               <div className="flex items-center gap-3">
                  <div className="bg-blue-600 p-2 rounded-lg text-white shadow-sm"><User size={20} /></div>
                  <div>
@@ -187,7 +179,7 @@ export default function StaffDirectory({ employees, setEmployees, rates, config 
                     <p className="text-xs text-gray-500">Update personnel records and payroll settings</p>
                  </div>
               </div>
-              <button onClick={() => setFullEditEmp(null)} className="text-gray-400 hover:text-gray-600 hover:bg-gray-200 p-2 rounded-full transition-colors" aria-label="Close employee editor">
+              <button onClick={() => setFullEditEmp(null)} className="text-gray-400 hover:text-gray-600 hover:bg-gray-200 p-2 rounded-full transition-colors">
                 <X size={24} />
               </button>
             </div>
@@ -245,7 +237,7 @@ export default function StaffDirectory({ employees, setEmployees, rates, config 
               {/* 2. Address */}
               <section>
                 <h4 className="flex items-center gap-2 text-sm font-bold text-gray-900 border-b border-gray-200 pb-2 mb-4 uppercase tracking-wider">
-                  Address
+                  <MapPin size={16} /> Address
                 </h4>
                 <div className="grid grid-cols-1 md:grid-cols-6 gap-6">
                    <div className="col-span-6">
@@ -270,7 +262,7 @@ export default function StaffDirectory({ employees, setEmployees, rates, config 
               {/* 3. Classification & Dates */}
               <section>
                 <h4 className="flex items-center gap-2 text-sm font-bold text-gray-900 border-b border-gray-200 pb-2 mb-4 uppercase tracking-wider">
-                  Classification
+                  <Briefcase size={16} /> Classification
                 </h4>
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                    <div className="col-span-2">
@@ -281,7 +273,7 @@ export default function StaffDirectory({ employees, setEmployees, rates, config 
                      </select>
                    </div>
                    
-                   {/* ADDED: Employment Type Selector */}
+                   {/* Employment Type */}
                    <div className="col-span-2">
                      <label className="label">Employment Type</label>
                      <select 
@@ -321,7 +313,38 @@ export default function StaffDirectory({ employees, setEmployees, rates, config 
                 </div>
               </section>
 
-              {/* 4. Payroll Configuration */}
+              {/* 4. LEAVE SETTINGS (Full Time Only) */}
+              {fullEditEmp.classifications.employment_type === 'Full Time' && (
+                <section className="bg-amber-50 p-6 rounded-xl border border-amber-200 shadow-sm animate-in fade-in">
+                   <h4 className="flex items-center gap-2 text-sm font-bold text-amber-800 uppercase tracking-wider mb-4">
+                     <Calendar size={16} /> Full-Time Leave Settings
+                   </h4>
+                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                      <div>
+                        <label className="label text-amber-900">FT Start Date</label>
+                        <input type="date" className="input-std border-amber-300 focus:ring-amber-500 bg-white" value={fullEditEmp.classifications.ft_start_date || ''} onChange={e => updateClass('ft_start_date', e.target.value)} />
+                        <p className="text-[10px] text-amber-700 mt-1">Determines Vacation Tier & Audit Date</p>
+                      </div>
+                      <div>
+                        <label className="label text-amber-900">Shift Schedule</label>
+                        <select className="input-std border-amber-300 focus:ring-amber-500 bg-white" value={fullEditEmp.classifications.shift_schedule || '12-Hour'} onChange={e => updateClass('shift_schedule', e.target.value)}>
+                           <option value="12-Hour">12-Hour Shift (48hr Week)</option>
+                           <option value="10-Hour">10-Hour Shift (40hr Week)</option>
+                        </select>
+                        <p className="text-[10px] text-amber-700 mt-1">Sets Day Value & Personal Cap</p>
+                      </div>
+                      <div>
+                        <label className="label text-amber-900">PTO Status</label>
+                        <select className="input-std border-amber-300 focus:ring-amber-500 bg-white" value={fullEditEmp.classifications.pto_status || 'Active'} onChange={e => updateClass('pto_status', e.target.value)}>
+                           <option value="Active">Active / Accruing</option>
+                           <option value="Frozen">Frozen (Leave of Absence)</option>
+                        </select>
+                      </div>
+                   </div>
+                </section>
+              )}
+
+              {/* 5. Payroll Configuration */}
               <section className="bg-slate-50 p-6 rounded-xl border border-slate-200 shadow-inner">
                 <div className="flex justify-between items-center border-b border-slate-200 pb-4 mb-4">
                    <h4 className="flex items-center gap-2 text-sm font-bold text-slate-800 uppercase tracking-wider">
@@ -395,7 +418,7 @@ export default function StaffDirectory({ employees, setEmployees, rates, config 
             </div>
 
             {/* Footer */}
-            <div className="p-5 border-t border-gray-200 bg-gray-50 flex justify-end gap-3 rounded-b-2xl">
+            <div className="p-5 border-t border-gray-200 bg-gray-50 flex justify-end gap-3 rounded-b-2xl shrink-0">
                <button onClick={() => setFullEditEmp(null)} className="px-5 py-2.5 text-gray-600 font-medium hover:bg-white hover:shadow-sm rounded-lg border border-transparent hover:border-gray-200 transition-all">Cancel</button>
                <button onClick={() => handleSaveFull(fullEditEmp)} className="px-6 py-2.5 bg-blue-600 text-white font-bold rounded-lg hover:bg-blue-700 shadow-md transform active:scale-95 transition-all">Save Changes</button>
             </div>

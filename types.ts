@@ -31,9 +31,20 @@ export interface MasterRates {
   pto_rules?: Record<string, PTORule>;
 }
 
+// --- NEW LEAVE INTERFACES ---
+export interface LeaveTransaction {
+  id: string;
+  date: string;
+  type: 'accrual' | 'usage' | 'adjustment' | 'reset';
+  amount_vacation: number;
+  amount_personal: number;
+  description: string;
+  balance_after: number; // Combined balance
+}
+
 export interface Employee {
   id: string;
-  employee_id?: string; 
+  employee_id?: string;
   personal: {
     full_name: string;
     first_name: string;
@@ -49,12 +60,17 @@ export interface Employee {
   classifications: {
     pay_level: string;
     rank: string;
-    employment_type?: 'Full Time' | 'PRN'; // <--- Ensure this is here
+    employment_type?: 'Full Time' | 'PRN';
     officer_rank?: string;
     fire_status?: string;
     ems_cert?: string;
     start_date_ems?: string;
     start_date_fire?: string;
+    
+    // --- NEW FIELDS FOR LEAVE ---
+    ft_start_date?: string; // The "Golden Key" for anniversaries
+    shift_schedule?: '10-Hour' | '12-Hour'; // Determines value of a day & caps
+    pto_status?: 'Active' | 'Frozen';
   };
   contact?: {
     phone: string;
@@ -66,10 +82,13 @@ export interface Employee {
     custom_rates: Record<string, number>;
   };
   status: string;
+  
+  // --- NEW LEAVE BANK ---
   leave_bank?: {
-    group: string;
-    current_balance: number;
-    history?: any[];
+    vacation_balance: number;
+    personal_balance: number;
+    last_accrual_date?: string;
+    history: LeaveTransaction[];
   };
 }
 
@@ -84,7 +103,7 @@ export interface PayrollRow {
   id: string;
   name: string;
   payLevel: string;
-  employmentType?: string; // Optional helper
+  employmentType?: string;
   code: string;
   hours: number;
   rate: number | null;
