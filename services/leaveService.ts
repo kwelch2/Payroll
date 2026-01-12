@@ -8,7 +8,7 @@ export function calculateMonthlyAccrual(employee: Employee) {
   const startDate = employee.classifications.ft_start_date;
   const shiftType = employee.classifications.shift_schedule || "";
 
-  // Defaults for missing data
+  // Defaults for missing data or non-Full Time
   if (!startDate || employee.classifications.employment_type !== 'Full Time') {
     return { 
       vacation: 0, 
@@ -37,8 +37,8 @@ export function calculateMonthlyAccrual(employee: Employee) {
   years = Math.max(0, years);
 
   // 2. Determine Day Value (Hours)
-  // FIX: Loose check for "12" to handle "12-Hour" or "12 Hour Shift"
-  const is12Hour = shiftType.includes('12');
+  // FIX: Loose check for "12" or "48" to handle variations like "12-Hour", "12 Hour Shift", "48/96"
+  const is12Hour = shiftType.includes('12') || shiftType.includes('48');
   const hoursPerDay = is12Hour ? 12 : 10;
 
   // 3. Determine Vacation Days Per Year (The Policy)
@@ -54,6 +54,7 @@ export function calculateMonthlyAccrual(employee: Employee) {
 
   // 4. Calculate Monthly Hours
   const vacationHours = (vacationDays * hoursPerDay) / 12;
+  // Personal Leave is fixed at 5 Days/Year
   const personalHours = (5 * hoursPerDay) / 12;
 
   return {
@@ -121,6 +122,9 @@ export function processLeaveUsage(employee: Employee, hoursUsed: number, date: s
   };
 }
 
+/**
+ * Checks for Anniversary Cap on Personal Leave.
+ */
 export function checkAnniversaryCap(employee: Employee): Employee {
   const bank = employee.leave_bank;
   const shiftType = employee.classifications.shift_schedule || "";
@@ -131,7 +135,7 @@ export function checkAnniversaryCap(employee: Employee): Employee {
   bank.personal_balance = bank.personal_balance || 0;
   bank.vacation_balance = bank.vacation_balance || 0;
 
-  const cap = shiftType.includes('12') ? 60 : 50;
+  const cap = (shiftType.includes('12') || shiftType.includes('48')) ? 60 : 50;
   
   if (bank.personal_balance > cap) {
     const forfeitAmount = bank.personal_balance - cap;
