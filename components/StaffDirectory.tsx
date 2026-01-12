@@ -25,7 +25,7 @@ export default function StaffDirectory({ employees, setEmployees, rates, config 
         pay_level: Object.keys(rates.pay_levels)[0] || "Hourly Only", 
         rank: config.ranks[0] || "Firefighter",
         employment_type: "PRN", 
-        shift_schedule: '12-Hour Shift', // --- UPDATED DEFAULT ---
+        shift_schedule: '12', // Updated Default
         fire_status: config.fire_statuses[0] || "Active",
         ems_cert: "",
         start_date_fire: "",
@@ -327,10 +327,10 @@ export default function StaffDirectory({ employees, setEmployees, rates, config 
                       </div>
                       <div>
                         <label className="label text-amber-900">Shift Schedule</label>
-                        {/* UPDATED: Values now match specific strings */}
-                        <select className="input-std border-amber-300 focus:ring-amber-500 bg-white" value={fullEditEmp.classifications.shift_schedule || '12-Hour Shift'} onChange={e => updateClass('shift_schedule', e.target.value)}>
-                           <option value="12-Hour Shift">12-Hour Shift (48hr Week)</option>
-                           <option value="10-Hour Shift">10-Hour Shift (40hr Week)</option>
+                        {/* UPDATED: Values now simplfied to "12" and "10" */}
+                        <select className="input-std border-amber-300 focus:ring-amber-500 bg-white" value={fullEditEmp.classifications.shift_schedule || '12'} onChange={e => updateClass('shift_schedule', e.target.value)}>
+                           <option value="12">12-Hour Shift (48hr Week)</option>
+                           <option value="10">10-Hour Shift (40hr Week)</option>
                         </select>
                         <p className="text-[10px] text-amber-700 mt-1">Sets Day Value & Personal Cap</p>
                       </div>
@@ -366,7 +366,6 @@ export default function StaffDirectory({ employees, setEmployees, rates, config 
                    </label>
                 </div>
 
-                {/* Standard Pay Level Select (Hidden if Override is active) */}
                 {!fullEditEmp.payroll_config?.use_user_pay_scale && (
                    <div className="max-w-md">
                      <label className="label">Matrix Pay Level</label>
@@ -383,7 +382,6 @@ export default function StaffDirectory({ employees, setEmployees, rates, config 
                    </div>
                 )}
 
-                {/* Custom Rates Grid (Visible ONLY if Override is active) */}
                 {fullEditEmp.payroll_config?.use_user_pay_scale && (
                    <div className="animate-in fade-in slide-in-from-top-2 duration-300">
                       <div className="p-4 bg-yellow-50 text-yellow-800 text-sm rounded-lg border border-yellow-200 mb-4 flex items-start gap-2">

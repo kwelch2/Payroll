@@ -66,9 +66,9 @@ export interface Employee {
     start_date_ems?: string;
     start_date_fire?: string;
     
-    // --- UPDATED: Matches the new format ---
+    // --- UPDATED: Now expects simple '10' or '12' ---
     ft_start_date?: string;
-    shift_schedule?: '10-Hour Shift' | '12-Hour Shift'; 
+    shift_schedule?: '10' | '12' | string; // 'string' allows legacy values temporarily
     pto_status?: 'Active' | 'Frozen';
   };
   contact?: {
