@@ -225,63 +225,56 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
 
   const SummaryView = () => (
     <div className="space-y-6 print-container">
-      <div className="text-center border-b-2 border-black pb-2 mb-4">
-        <h3 className="font-bold text-xl uppercase tracking-widest">Payroll Summary Report</h3>
-        <p className="text-xs text-gray-500">Grouped by Employee • {finalPrintData.length} records found</p>
-      </div>
-
-      <div className="space-y-6">
-        {summaryGroups.map((emp) => (
-          <div key={emp.name} className="break-inside-avoid border-2 border-slate-800 rounded-lg overflow-hidden shadow-sm page-break-avoid">
-            <div className="bg-gray-100 p-3 flex justify-between items-center border-b-2 border-slate-300">
-               <div>
-                 <span className="font-bold text-gray-900 text-sm">{emp.name}</span>
-                 <span className="mx-2 text-gray-400">|</span>
-                 <span className="text-[10px] text-gray-600 uppercase tracking-wider font-bold">{emp.payLevel}</span>
-                 <span className="mx-2 text-gray-400">|</span>
-                 <span className="text-[10px] text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full font-bold border border-blue-200">{emp.status}</span>
-               </div>
-               <div className="text-right">
-                 <span className="font-mono font-bold text-sm text-gray-900">${emp.grandTotal.toFixed(2)}</span>
-               </div>
-            </div>
-            <table className="w-full text-xs">
-               <tbody>
-                 {Array.from(emp.codes.values()).map((code) => (
-                   <tr key={code.label} className="border-b border-gray-300 last:border-0" style={{ backgroundColor: `${code.color}10` }}>
-                     <td className="pl-4 py-2 w-1/2 flex items-center gap-2 font-medium text-gray-700">
-                        <div className="w-2 h-2 rounded-full border border-gray-400" style={{ backgroundColor: code.color }}></div>
-                        {code.label}
-                     </td>
-                     
-                     {/* UPDATED: Side-by-side Layout for Qty/Hrs */}
-                     <td className="py-2 text-right w-1/4 text-gray-700 font-mono">
-                        {code.isFlat ? (
-                            <div className="flex items-baseline justify-end gap-2">
-                                <span className="font-bold text-sm">{code.count} Qty</span>
-                                <span className="text-[10px] text-gray-400">({code.hours.toFixed(2)}h)</span>
-                            </div>
-                        ) : (
-                            <div className="flex items-baseline justify-end gap-2">
-                                <span className="font-bold text-sm">{code.hours.toFixed(2)} Hrs</span>
-                                <span className="text-[10px] text-gray-400">({code.count}s)</span>
-                            </div>
-                        )}
-                     </td>
-
-                     <td className="pr-4 py-2 text-right w-1/4 font-mono font-bold text-gray-800">${code.total.toFixed(2)}</td>
-                   </tr>
-                 ))}
-                 <tr className="bg-white border-t-2 border-gray-300">
-                    <td className="pl-4 py-2 font-bold text-gray-500 uppercase text-[10px]">Total</td>
-                    <td className="py-2 text-right font-bold text-gray-900">{emp.totalHours.toFixed(2)} hrs</td>
-                    <td className="pr-4 py-2 text-right font-black text-gray-900 text-sm">${emp.grandTotal.toFixed(2)}</td>
-                 </tr>
-               </tbody>
-            </table>
+      {summaryGroups.map((emp) => (
+        <div key={emp.name} className="break-inside-avoid border-2 border-slate-800 rounded-lg overflow-hidden shadow-sm page-break-avoid">
+          <div className="bg-gray-100 p-3 flex justify-between items-center border-b-2 border-slate-300">
+             <div>
+               <span className="font-bold text-gray-900 text-sm">{emp.name}</span>
+               <span className="mx-2 text-gray-400">|</span>
+               <span className="text-[10px] text-gray-600 uppercase tracking-wider font-bold">{emp.payLevel}</span>
+               <span className="mx-2 text-gray-400">|</span>
+               <span className="text-[10px] text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full font-bold border border-blue-200">{emp.status}</span>
+             </div>
+             <div className="text-right">
+               <span className="font-mono font-bold text-sm text-gray-900">${emp.grandTotal.toFixed(2)}</span>
+             </div>
           </div>
-        ))}
-      </div>
+          <table className="w-full text-xs">
+             <tbody>
+               {Array.from(emp.codes.values()).map((code) => (
+                 <tr key={code.label} className="border-b border-gray-300 last:border-0" style={{ backgroundColor: `${code.color}10` }}>
+                   <td className="pl-4 py-2 w-1/2 flex items-center gap-2 font-medium text-gray-700">
+                      <div className="w-2 h-2 rounded-full border border-gray-400" style={{ backgroundColor: code.color }}></div>
+                      {code.label}
+                   </td>
+                   
+                   {/* Qty/Hrs Side-by-Side */}
+                   <td className="py-2 text-right w-1/4 text-gray-700 font-mono">
+                      {code.isFlat ? (
+                          <div className="flex items-baseline justify-end gap-2">
+                              <span className="font-bold text-sm">{code.count} Qty</span>
+                              <span className="text-[10px] text-gray-400">({code.hours.toFixed(2)}h)</span>
+                          </div>
+                      ) : (
+                          <div className="flex items-baseline justify-end gap-2">
+                              <span className="font-bold text-sm">{code.hours.toFixed(2)} Hrs</span>
+                              <span className="text-[10px] text-gray-400">({code.count}s)</span>
+                          </div>
+                      )}
+                   </td>
+
+                   <td className="pr-4 py-2 text-right w-1/4 font-mono font-bold text-gray-800">${code.total.toFixed(2)}</td>
+                 </tr>
+               ))}
+               <tr className="bg-white border-t-2 border-gray-300">
+                  <td className="pl-4 py-2 font-bold text-gray-500 uppercase text-[10px]">Total</td>
+                  <td className="py-2 text-right font-bold text-gray-900">{emp.totalHours.toFixed(2)} hrs</td>
+                  <td className="pr-4 py-2 text-right font-black text-gray-900 text-sm">${emp.grandTotal.toFixed(2)}</td>
+               </tr>
+             </tbody>
+          </table>
+        </div>
+      ))}
 
       <div className="mt-8 border-t-2 border-black pt-4 flex justify-between items-center text-sm font-bold page-break-avoid">
          <span>Grand Total (All Employees)</span>
@@ -292,16 +285,6 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
 
   const DetailView = () => (
     <div>
-      <div className="text-center border-b-2 border-black pb-2 mb-4">
-        <h3 className="font-bold text-xl uppercase tracking-widest">Detailed Audit Log</h3>
-        <p className="text-xs text-gray-500">Line-by-line breakdown • Sorted by {sortField}</p>
-        {processedData.length > previewLimit && !renderAll && (
-          <div className="mt-2 text-[10px] text-amber-600 font-medium">
-            Showing first {previewLimit} rows for performance. Use “Render All” before printing.
-          </div>
-        )}
-      </div>
-
       <table className="w-full text-left border-collapse text-[10px] md:text-xs">
          <thead>
            <tr className="border-b-2 border-slate-900 bg-gray-50 text-slate-500 uppercase tracking-wider font-bold">
@@ -333,7 +316,6 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
                  <td className="py-1.5 px-2 font-medium text-gray-700">{row.code}</td>
                  <td className="py-1.5 px-2 text-gray-500">{row.startDate || '-'}</td>
                  
-                 {/* UPDATED: Side-by-side Logic for Detail View */}
                  <td className="py-1.5 px-2 text-right font-mono text-gray-600">
                     {isFlat ? (
                         <div className="flex items-baseline justify-end gap-1">
@@ -363,23 +345,28 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
            </tr>
          </tfoot>
       </table>
+      
+      {finalPrintData.length > previewLimit && !renderAll && (
+        <div className="mt-4 text-center no-print">
+           <div className="text-xs text-amber-600 mb-2 font-bold">Preview Limited to {previewLimit} Rows</div>
+           <button onClick={() => setRenderAll(true)} className="text-xs font-bold bg-amber-50 text-amber-700 px-3 py-2 rounded border border-amber-200 hover:bg-amber-100">
+             Render All {finalPrintData.length} Rows for Printing
+           </button>
+        </div>
+      )}
     </div>
   );
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200 modal-overlay">
-      <div
-        ref={modalRef}
-        tabIndex={-1}
-        className="bg-white w-full max-w-7xl h-[95vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-gray-700 ring-1 ring-white/10 modal-container"
-      >
+      <div ref={modalRef} tabIndex={-1} className="bg-white w-full max-w-7xl h-[95vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-gray-700 ring-1 ring-white/10 modal-container">
         
-        {/* HEADER - No Print */}
+        {/* HEADER */}
         <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-slate-900 text-white no-print shrink-0">
            <div className="flex items-center gap-3">
              <div className="bg-blue-600 p-2 rounded-lg shadow-lg shadow-blue-900/50"><Printer size={20} className="text-white" /></div>
              <div>
-               <h2 id="print-wizard-title" className="text-lg font-bold">Print & Finalize</h2>
+               <h2 className="text-lg font-bold tracking-tight">Print & Finalize</h2>
                <p className="text-xs text-slate-400">Review, filter, and select data for final report</p>
              </div>
            </div>
@@ -388,9 +375,9 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
 
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden scroll-wrapper">
            
-           {/* SIDEBAR CONTROLS - No Print */}
+           {/* SIDEBAR CONTROLS */}
            <div className="w-full md:w-80 bg-slate-50 border-r border-gray-200 flex flex-col gap-5 p-5 no-print overflow-y-auto shrink-0">
-              {/* ... Sidebar Controls ... */}
+              
               <div className="space-y-2">
                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1"><LayoutList size={10}/> Report Layout</label>
                  <div className="grid grid-cols-2 gap-1 bg-white p-1 rounded-lg border border-gray-200 shadow-sm">
@@ -510,7 +497,7 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
                     {layout === 'detail' && <DetailView />}
                  </div>
 
-                 {/* Signatures Area */}
+                 {/* Signatures Area - MOVED TO BOTTOM */}
                  <div className="mt-12 mb-8 grid grid-cols-2 gap-12 bg-slate-50 p-4 rounded-lg border border-slate-100 print:bg-white print:border-none print:p-0 page-break-avoid">
                     <div>
                        <div className="h-8 border-b border-slate-400 mb-1"></div>
@@ -540,9 +527,17 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
       <style>{`
         @media print {
           @page { margin: 15mm 10mm 15mm 10mm; }
-          body { visibility: hidden; }
           
-          /* Hide Sidebar and Modal UI */
+          /* RESET PAGE & HIDE EVERYTHING ELSE */
+          html, body {
+             margin: 0 !important;
+             padding: 0 !important;
+             height: auto !important;
+             overflow: visible !important;
+             visibility: hidden !important;
+          }
+          
+          /* HIDE Sidebar and Modal UI */
           .no-print, button, .lucide { display: none !important; }
           
           /* RESET MODAL CONTAINERS */
@@ -552,6 +547,8 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
              display: block !important;
              padding: 0 !important;
              margin: 0 !important;
+             width: 100% !important;
+             height: auto !important;
              visibility: visible !important;
           }
           .modal-container {
@@ -577,10 +574,10 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
              visibility: visible !important;
           }
           
-          /* Target the Print Area specifically */
+          /* POSITION PRINT AREA AT ABSOLUTE TOP */
           #print-area {
              visibility: visible !important;
-             position: relative !important;
+             position: absolute !important;
              left: 0 !important;
              top: 0 !important;
              width: 100% !important;
@@ -593,17 +590,18 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
              visibility: visible !important;
           }
 
-          /* Ensure Page Breaks behave */
+          /* PAGE BREAKS */
           .break-inside-avoid { break-inside: avoid; page-break-inside: avoid; }
           .page-break-avoid { page-break-inside: avoid; }
           
-          /* Footer Placement */
+          /* FOOTER */
           .fixed-footer {
              position: fixed;
              bottom: 0;
              left: 0;
              width: 100%;
              background: white;
+             z-index: 1000;
           }
         }
       `}</style>
