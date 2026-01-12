@@ -97,8 +97,8 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
         case 'code': valA = a.code; valB = b.code; break;
         case 'date': valA = a.startDate || ''; valB = b.startDate || ''; break;
         case 'total':
-           valA = a.manual_rate_override ? (a.manual_rate_override * (rates.pay_codes.definitions.find(d=>d.label===a.code)?.type==='flat'?1:a.hours)) : (a.total || 0);
-           valB = b.manual_rate_override ? (b.manual_rate_override * (rates.pay_codes.definitions.find(d=>d.label===b.code)?.type==='flat'?1:b.hours)) : (b.total || 0);
+           valA = getCalculatedTotal(a);
+           valB = getCalculatedTotal(b);
            break;
       }
 
@@ -109,6 +109,15 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
 
     return result;
   }, [data, search, selectedStatus, selectedLevels, selectedCodes, sortField, sortAsc, rates, empStatusMap]);
+
+  const getCalculatedTotal = (row: PayrollRow) => {
+      if (row.manual_rate_override !== undefined && row.manual_rate_override !== null) {
+          const def = rates.pay_codes.definitions.find(d => d.label === row.code);
+          const isFlat = def?.type === 'flat';
+          return row.manual_rate_override * (isFlat ? 1 : row.hours);
+      }
+      return row.total || 0;
+  };
 
   // --- 3. FINAL SET FOR PRINTING ---
   const finalPrintData = useMemo(() => {
@@ -122,7 +131,7 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
       name: string,
       payLevel: string,
       status: string,
-      codes: Map<string, { label: string, hours: number, total: number, color: string }>,
+      codes: Map<string, { label: string, hours: number, total: number, count: number, color: string, isFlat: boolean }>,
       grandTotal: number,
       totalHours: number
     }>();
@@ -140,28 +149,26 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
       }
       
       const emp = groups.get(row.name)!;
-      
-      let pay = row.total || 0;
-      if (row.manual_rate_override !== undefined && row.manual_rate_override !== null) {
-         const def = rates.pay_codes.definitions.find(d => d.label === row.code);
-         const isFlat = def?.type === 'flat';
-         pay = row.manual_rate_override * (isFlat ? 1 : row.hours);
-      }
+      const pay = getCalculatedTotal(row);
 
       emp.grandTotal += pay;
       emp.totalHours += row.hours;
 
       if (!emp.codes.has(row.code)) {
+        const def = rates.pay_codes.definitions.find(d => d.label === row.code);
         emp.codes.set(row.code, { 
             label: row.code, 
             hours: 0, 
             total: 0,
-            color: rates.pay_codes.definitions.find(d => d.label === row.code)?.color || '#e2e8f0'
+            count: 0, // Added Count Tracker
+            color: def?.color || '#e2e8f0',
+            isFlat: def?.type === 'flat'
         });
       }
       const codeStats = emp.codes.get(row.code)!;
       codeStats.hours += row.hours;
       codeStats.total += pay;
+      codeStats.count += 1;
     });
 
     return Array.from(groups.values());
@@ -246,7 +253,22 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
                         <div className="w-2 h-2 rounded-full border border-gray-400" style={{ backgroundColor: code.color }}></div>
                         {code.label}
                      </td>
-                     <td className="py-2 text-right w-1/4 text-gray-600 font-mono">{code.hours.toFixed(2)} {code.label.toLowerCase().includes('flat') ? 'qty' : 'hrs'}</td>
+                     
+                     {/* UPDATED: Qty/Hrs Display Logic */}
+                     <td className="py-2 text-right w-1/4 text-gray-700 font-mono">
+                        {code.isFlat ? (
+                            <div className="flex flex-col items-end leading-none">
+                                <span className="font-bold text-sm">{code.count} Qty</span>
+                                <span className="text-[9px] text-gray-400 mt-0.5">{code.hours.toFixed(2)} hrs</span>
+                            </div>
+                        ) : (
+                            <div className="flex flex-col items-end leading-none">
+                                <span className="font-bold text-sm">{code.hours.toFixed(2)} Hrs</span>
+                                <span className="text-[9px] text-gray-400 mt-0.5">{code.count} shift{code.count !== 1 ? 's' : ''}</span>
+                            </div>
+                        )}
+                     </td>
+
                      <td className="pr-4 py-2 text-right w-1/4 font-mono font-bold text-gray-800">${code.total.toFixed(2)}</td>
                    </tr>
                  ))}
@@ -294,9 +316,8 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
          </thead>
          <tbody>
            {(renderAll ? finalPrintData : finalPrintData.slice(0, previewLimit)).map((row, i) => {
-             const pay = row.manual_rate_override !== undefined && row.manual_rate_override !== null
-               ? row.manual_rate_override * (rates.pay_codes.definitions.find(d => d.label === row.code)?.type === 'flat' ? 1 : row.hours)
-               : (row.total || 0);
+             const isFlat = rates.pay_codes.definitions.find(d => d.label === row.code)?.type === 'flat';
+             const pay = getCalculatedTotal(row);
              const color = getCodeColor(row.code);
              const status = row.employmentType || empStatusMap.get(row.name) || 'PRN';
 
@@ -311,7 +332,22 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
                  </td>
                  <td className="py-1.5 px-2 font-medium text-gray-700">{row.code}</td>
                  <td className="py-1.5 px-2 text-gray-500">{row.startDate || '-'}</td>
-                 <td className="py-1.5 px-2 text-right font-mono text-gray-600">{row.hours.toFixed(2)}</td>
+                 
+                 {/* UPDATED: Qty/Hrs Display Logic for Detail View */}
+                 <td className="py-1.5 px-2 text-right font-mono text-gray-600">
+                    {isFlat ? (
+                        <div className="flex flex-col items-end leading-none">
+                            <span className="font-bold">1.00</span>
+                            <span className="text-[8px] text-gray-400 mt-0.5">{row.hours.toFixed(2)} hrs</span>
+                        </div>
+                    ) : (
+                        <div className="flex flex-col items-end leading-none">
+                            <span className="font-bold">{row.hours.toFixed(2)}</span>
+                            <span className="text-[8px] text-gray-400 mt-0.5">1 shift</span>
+                        </div>
+                    )}
+                 </td>
+
                  <td className="py-1.5 px-2 text-right font-mono text-gray-400">{row.manual_rate_override ? `*${row.manual_rate_override}` : (row.rate ?? '-')}</td>
                  <td className="py-1.5 px-2 text-right font-mono font-bold text-gray-900">${pay.toFixed(2)}</td>
                </tr>
@@ -323,12 +359,7 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
               <td colSpan={4} className="py-2 px-1 text-right">Report Totals:</td>
               <td className="py-2 px-1 text-right">{processedData.reduce((acc, r) => acc + r.hours, 0).toFixed(2)}</td>
               <td></td>
-              <td className="py-2 px-1 text-right">${processedData.reduce((acc, r) => {
-                 const p = r.manual_rate_override !== undefined && r.manual_rate_override !== null
-                   ? r.manual_rate_override * (rates.pay_codes.definitions.find(d => d.label === r.code)?.type === 'flat' ? 1 : r.hours)
-                   : (r.total || 0);
-                 return acc + p;
-              }, 0).toFixed(2)}</td>
+              <td className="py-2 px-1 text-right">${processedData.reduce((acc, r) => acc + getCalculatedTotal(r), 0).toFixed(2)}</td>
            </tr>
          </tfoot>
       </table>
