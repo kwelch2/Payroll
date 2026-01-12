@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { PayrollRow, Employee, MasterRates } from '../types';
 import { calculatePayRow, getRowColor } from '../services/payrollService';
 import { 
   Edit2, Printer, RefreshCw, FileUp, 
   AlertTriangle, UploadCloud, ChevronRight, 
-  Filter, Clock, DollarSign, Hash, ArrowUpDown, ArrowUp, ArrowDown
+  Filter, Clock, DollarSign, Hash, ArrowUpDown, ArrowUp, ArrowDown,
+  Search, ListFilter
 } from 'lucide-react';
 import RowModal from './RowModal';
 import PrintWizard from './PrintWizard';
@@ -15,7 +16,7 @@ interface EditorProps {
   setData: (data: PayrollRow[]) => void;
   employees: Employee[];
   rates: MasterRates;
-  onSave: () => void; // Connects to the parent page's Folder Browser
+  onSave: () => void;
 }
 
 type ViewMode = 'summary' | 'detail';
@@ -29,22 +30,33 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
   const [showPrintWizard, setShowPrintWizard] = useState(false);
   const { notify, confirm } = useFeedback();
   
-  // Filter States
+  // --- VIEW STATE ---
   const [viewMode, setViewMode] = useState<ViewMode>('summary');
-  const [filterMode, setFilterMode] = useState<FilterMode>('all');
-  const [empFilter, setEmpFilter] = useState<EmploymentFilter>('all');
-  
-  // Sort States
-  const [sortKey, setSortKey] = useState<SortKey>('name');
-  const [sortDir, setSortDir] = useState<SortDirection>('asc');
-
-  // Accordion States
-  const [collapsedEmp, setCollapsedEmp] = useState<Set<string>>(new Set());
-  const [expandedCode, setExpandedCode] = useState<Set<string>>(new Set());
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 100;
 
-  // --- Helpers ---
+  // --- FILTER STATES ---
+  // Fix: Explicitly applying the types here removes the "unused type" warning
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterStatus, setFilterStatus] = useState<EmploymentFilter>("all"); 
+  const [filterLevel, setFilterLevel] = useState("all");
+  const [filterCode, setFilterCode] = useState("all");
+  const [filterFlags, setFilterFlags] = useState<FilterMode>("all");
+
+  // --- SORT STATES ---
+  // Fix: Changed <string> to <SortKey> so the type is used
+  const [sortKey, setSortKey] = useState<SortKey>('name');
+  const [sortDir, setSortDir] = useState<SortDirection>('asc');
+
+  // --- ACCORDION STATE ---
+  const [collapsedEmp, setCollapsedEmp] = useState<Set<string>>(new Set());
+  const [expandedCode, setExpandedCode] = useState<Set<string>>(new Set());
+
+  // --- DERIVED LISTS ---
+  const uniquePayCodes = useMemo(() => Array.from(new Set(data.map(r => r.code))).sort(), [data]);
+  const uniquePayLevels = useMemo(() => Array.from(new Set(data.map(r => r.payLevel))).sort(), [data]);
+
+  // --- HELPERS ---
   const getEffectiveTotal = (row: PayrollRow) => {
     if (row.manual_rate_override !== undefined && row.manual_rate_override !== null) {
        const def = rates.pay_codes.definitions.find(d => d.label === row.code);
@@ -54,30 +66,40 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
     return row.total || 0;
   };
 
-  // --- Filtering & Sorting ---
+  // --- FILTERING & SORTING ENGINE ---
   const filteredData = useMemo(() => {
     let result = data.filter(row => {
-      // 1. Alert/Type Filter
-      if (filterMode === 'flagged' && !row.alert) return false;
-      if (filterMode === 'standby' && !(row.code.toLowerCase().includes('standby') || row.code.toLowerCase().includes('on call'))) return false;
+      // Search
+      if (searchQuery && !row.name.toLowerCase().includes(searchQuery.toLowerCase())) return false;
       
-      // 2. Employment Status Filter
-      if (empFilter !== 'all') {
-         // "PRN" matches "PRN" or missing status
-         if (empFilter === 'PRN') {
-            return row.employmentType === 'PRN' || !row.employmentType;
+      // Status
+      if (filterStatus !== 'all') {
+         if (filterStatus === 'PRN') {
+            if (row.employmentType && row.employmentType !== 'PRN') return false;
+         } else {
+            if (row.employmentType !== filterStatus) return false;
          }
-         return row.employmentType === empFilter;
       }
+
+      // Level & Code
+      if (filterLevel !== 'all' && row.payLevel !== filterLevel) return false;
+      if (filterCode !== 'all' && row.code !== filterCode) return false;
+
+      // Flags
+      if (filterFlags === 'flagged' && !row.alert) return false;
+      if (filterFlags === 'standby') {
+         const lower = row.code.toLowerCase();
+         if (!lower.includes('standby') && !lower.includes('on call')) return false;
+      }
+
       return true;
     });
 
-    // 3. Sorting
+    // Sorting
     return result.sort((a, b) => {
         let valA: any = a[sortKey as keyof PayrollRow];
         let valB: any = b[sortKey as keyof PayrollRow];
 
-        // Special handling for calculated/virtual columns
         if (sortKey === 'total') {
             valA = getEffectiveTotal(a);
             valB = getEffectiveTotal(b);
@@ -87,7 +109,6 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
             valB = b.alert || '';
         }
 
-        // Handle nulls
         if (valA === null || valA === undefined) valA = '';
         if (valB === null || valB === undefined) valB = '';
 
@@ -95,9 +116,9 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
         if (valA > valB) return sortDir === 'asc' ? 1 : -1;
         return 0;
     });
-  }, [data, filterMode, empFilter, sortKey, sortDir, rates]);
+  }, [data, searchQuery, filterStatus, filterLevel, filterCode, filterFlags, sortKey, sortDir, rates]);
 
-  // --- Stats Calculation ---
+  // --- STATS ---
   const stats = useMemo(() => {
     return filteredData.reduce((acc, row) => {
       const total = getEffectiveTotal(row);
@@ -110,12 +131,10 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
         flagged: acc.flagged + (row.alert ? 1 : 0)
       };
     }, { grandTotal: 0, totalHours: 0, standbyQty: 0, flagged: 0 });
-  }, [filteredData, rates]); // Use filteredData so stats reflect filters
+  }, [filteredData, rates]);
 
-  // Reset pagination on filter change
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [filterMode, empFilter, data.length]);
+  // Reset pagination
+  useEffect(() => { setCurrentPage(1); }, [filteredData.length]);
 
   const totalPages = Math.max(1, Math.ceil(filteredData.length / pageSize));
   const pagedData = useMemo(() => {
@@ -123,91 +142,39 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
     return filteredData.slice(start, start + pageSize);
   }, [filteredData, currentPage, pageSize]);
 
+  // Grouping
   const groupedData = useMemo(() => {
-    const groups: Record<string, { 
-      name: string, 
-      payLevel: string, 
-      totalPay: number, 
-      totalHours: number, 
-      codes: Record<string, { totalPay: number, totalHours: number, rows: PayrollRow[] }> 
-    }> = {};
-
+    const groups: Record<string, any> = {};
     filteredData.forEach(row => {
       if (!groups[row.name]) {
         groups[row.name] = { 
           name: row.name, 
           payLevel: row.payLevel, 
-          totalPay: 0, 
-          totalHours: 0, 
-          codes: {} 
+          totalPay: 0, totalHours: 0, codes: {} 
         };
       }
-      
       const emp = groups[row.name];
       const pay = getEffectiveTotal(row);
-
       emp.totalPay += pay;
       emp.totalHours += row.hours;
 
-      if (!emp.codes[row.code]) {
-        emp.codes[row.code] = { totalPay: 0, totalHours: 0, rows: [] };
-      }
-      
+      if (!emp.codes[row.code]) emp.codes[row.code] = { totalPay: 0, totalHours: 0, rows: [] };
       emp.codes[row.code].totalPay += pay;
       emp.codes[row.code].totalHours += row.hours;
       emp.codes[row.code].rows.push(row);
     });
-
-    return Object.values(groups); 
+    return Object.values(groups);
   }, [filteredData, rates]);
 
-  // --- Actions ---
-
+  // --- ACTIONS ---
   const handleSort = (key: SortKey) => {
-      if (sortKey === key) {
-          setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
-      } else {
-          setSortKey(key);
-          setSortDir('asc');
-      }
-  };
-
-  const toggleEmp = (name: string) => {
-    const newSet = new Set(collapsedEmp);
-    if (newSet.has(name)) newSet.delete(name);
-    else newSet.add(name);
-    setCollapsedEmp(newSet);
-  };
-
-  const toggleCode = (id: string) => {
-    const newSet = new Set(expandedCode);
-    if (newSet.has(id)) newSet.delete(id);
-    else newSet.add(id);
-    setExpandedCode(newSet);
-  };
-
-  const handleUpdateRow = (updated: PayrollRow) => {
-    setData(data.map(r => r.id === updated.id ? updated : r));
-    setEditingRow(null);
-  };
-
-  const handleDeleteRow = async (id: string) => {
-    const approved = await confirm({
-      title: 'Delete Line Item',
-      message: 'Are you sure you want to delete this line?',
-      confirmLabel: 'Delete',
-      cancelLabel: 'Cancel'
-    });
-    if (approved) {
-      setData(data.filter(r => r.id !== id));
-      setEditingRow(null);
-    }
+      if (sortKey === key) setSortDir(sortDir === 'asc' ? 'desc' : 'asc');
+      else { setSortKey(key); setSortDir('asc'); }
   };
 
   const handleRefresh = () => {
     const refreshed = data.map(r => {
       const calc = calculatePayRow(r.name, r.code, r.hours, employees, rates);
-      // Preserve manual edits
       calc.manual_rate_override = r.manual_rate_override;
       calc.manual_note = r.manual_note;
       calc.id = r.id;
@@ -218,65 +185,49 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
       return calc;
     });
     setData(refreshed);
-    notify('success', 'Draft refreshed. Full Time "Zero Rate" errors suppressed.');
+    notify('success', 'Recalculated all rates based on current settings.');
+  };
+
+  const handleUpdateRow = (updated: PayrollRow) => {
+    setData(data.map(r => r.id === updated.id ? updated : r));
+    setEditingRow(null);
+  };
+
+  const handleDeleteRow = async (id: string) => {
+    if (await confirm({ title: 'Delete Line', message: 'Delete this line item?', confirmLabel: 'Delete' })) {
+      setData(data.filter(r => r.id !== id));
+      setEditingRow(null);
+    }
   };
 
   const handleCSVImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    
     const reader = new FileReader();
     reader.onload = (evt) => {
       const text = evt.target?.result as string;
       const lines = text.split('\n');
       const newRows: PayrollRow[] = [];
       let headerIndex = -1;
-      
       for (let i = 0; i < Math.min(lines.length, 20); i++) {
-        if (lines[i].includes("Last Name") && lines[i].includes("Start Date")) {
-          headerIndex = i;
-          break;
-        }
+        if (lines[i].includes("Last Name") && lines[i].includes("Start Date")) { headerIndex = i; break; }
       }
-
-      if (headerIndex === -1) {
-        notify('error', "Could not find valid header row. Ensure CSV has 'Last Name', 'Start Date', etc.");
-        return;
-      }
+      if (headerIndex === -1) { notify('error', "Invalid CSV Header."); return; }
 
       for (let i = headerIndex + 1; i < lines.length; i++) {
         const line = lines[i].trim();
         if (!line) continue;
         const cols = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(c => c.replace(/^"|"$/g, '').trim());
-        
         if (cols.length < 10) continue;
-
-        const lastName = cols[0];
-        const firstName = cols[1];
-        const startDate = cols[5];
-        const startTime = cols[6];
-        const endDate = cols[7];
-        const endTime = cols[8];
         const payCode = cols[9];
         const hours = parseFloat(cols[10]);
-
         if (payCode && !isNaN(hours)) {
-           const fullName = `${lastName}, ${firstName}`;
-           const row = calculatePayRow(fullName, payCode, hours, employees, rates);
-           row.startDate = startDate;
-           row.startTime = startTime;
-           row.endDate = endDate;
-           row.endTime = endTime;
+           const row = calculatePayRow(`${cols[0]}, ${cols[1]}`, payCode, hours, employees, rates);
+           row.startDate = cols[5]; row.startTime = cols[6]; row.endDate = cols[7]; row.endTime = cols[8];
            newRows.push(row);
         }
       }
-      
-      if (newRows.length > 0) {
-        setData(newRows);
-        notify('success', `Successfully imported ${newRows.length} rows.`);
-      } else {
-        notify('error', 'No valid rows found. Please check your CSV format.');
-      }
+      if (newRows.length > 0) { setData(newRows); notify('success', `Imported ${newRows.length} rows.`); }
     };
     reader.readAsText(file);
     e.target.value = '';
@@ -288,93 +239,118 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
   };
 
   return (
-    <div className="space-y-6 pb-20">
+    <div className="space-y-4 pb-20">
       
-      {/* Stats Bar */}
+      {/* 1. TOP STATS BAR */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col">
-          <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2"><DollarSign size={14} /> Gross Pay</span>
+          <span className="text-xs font-bold text-gray-400 uppercase flex gap-2"><DollarSign size={14} /> Gross Pay</span>
           <span className="text-2xl font-bold text-gray-900 mt-1">${stats.grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
         </div>
         <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col">
-          <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-2"><Clock size={14} /> Total Hours</span>
+          <span className="text-xs font-bold text-gray-400 uppercase flex gap-2"><Clock size={14} /> Total Hours</span>
           <span className="text-2xl font-bold text-gray-900 mt-1">{stats.totalHours.toFixed(2)}</span>
         </div>
-        <button type="button" onClick={() => setFilterMode(filterMode === 'standby' ? 'all' : 'standby')} className={`p-4 rounded-xl shadow-sm border text-left ${filterMode === 'standby' ? 'bg-blue-50 border-blue-400 ring-2 ring-blue-100' : 'bg-white border-gray-200'}`}>
-          <span className={`text-xs font-bold uppercase tracking-wider flex items-center gap-2 ${filterMode === 'standby' ? 'text-blue-700' : 'text-gray-400'}`}><Hash size={14} /> Standby Qty</span>
-          <span className={`text-2xl font-bold mt-1 ${filterMode === 'standby' ? 'text-blue-800' : 'text-blue-600'}`}>{stats.standbyQty.toFixed(0)}</span>
+        <button type="button" onClick={() => setFilterFlags(filterFlags === 'standby' ? 'all' : 'standby')} className={`p-4 rounded-xl shadow-sm border text-left ${filterFlags === 'standby' ? 'bg-blue-50 border-blue-400 ring-2 ring-blue-100' : 'bg-white border-gray-200'}`}>
+          <span className={`text-xs font-bold uppercase tracking-wider flex items-center gap-2 ${filterFlags === 'standby' ? 'text-blue-700' : 'text-gray-400'}`}><Hash size={14} /> Standby Qty</span>
+          <span className={`text-2xl font-bold mt-1 ${filterFlags === 'standby' ? 'text-blue-800' : 'text-blue-600'}`}>{stats.standbyQty.toFixed(0)}</span>
         </button>
-        <button type="button" onClick={() => setFilterMode(filterMode === 'flagged' ? 'all' : 'flagged')} className={`p-4 rounded-xl shadow-sm border text-left ${filterMode === 'flagged' ? 'bg-red-50 border-red-400 ring-2 ring-red-100' : 'bg-white border-gray-200'}`}>
-          <span className={`text-xs font-bold uppercase tracking-wider flex items-center gap-2 ${filterMode === 'flagged' || stats.flagged > 0 ? 'text-red-600' : 'text-gray-400'}`}><AlertTriangle size={14} /> Flags / Errors</span>
-          <span className={`text-2xl font-bold mt-1 ${filterMode === 'flagged' || stats.flagged > 0 ? 'text-red-700' : 'text-gray-900'}`}>{stats.flagged}</span>
+        <button type="button" onClick={() => setFilterFlags(filterFlags === 'flagged' ? 'all' : 'flagged')} className={`p-4 rounded-xl shadow-sm border text-left ${filterFlags === 'flagged' ? 'bg-red-50 border-red-400 ring-2 ring-red-100' : 'bg-white border-gray-200'}`}>
+          <span className={`text-xs font-bold uppercase tracking-wider flex items-center gap-2 ${filterFlags === 'flagged' || stats.flagged > 0 ? 'text-red-600' : 'text-gray-400'}`}><AlertTriangle size={14} /> Flags / Errors</span>
+          <span className={`text-2xl font-bold mt-1 ${filterFlags === 'flagged' || stats.flagged > 0 ? 'text-red-700' : 'text-gray-900'}`}>{stats.flagged}</span>
         </button>
       </div>
 
-      {/* Controls */}
-      <div className="flex flex-col md:flex-row justify-between items-end md:items-center gap-4 bg-white p-4 rounded-xl shadow-sm border border-gray-200 sticky top-0 z-10">
-        <div className="flex bg-gray-100 p-1 rounded-lg">
-          <button onClick={() => setViewMode('summary')} className={`px-4 py-2 rounded-md text-sm font-medium ${viewMode === 'summary' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Summary</button>
-          <button onClick={() => setViewMode('detail')} className={`px-4 py-2 rounded-md text-sm font-medium ${viewMode === 'detail' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Detailed</button>
+      {/* 2. ADVANCED TOOLBAR */}
+      <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 space-y-4 sticky top-0 z-20">
+        
+        {/* Quick Picks: View & Search */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+           <div className="flex bg-gray-100 p-1 rounded-lg shrink-0">
+              <button onClick={() => setViewMode('summary')} className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${viewMode === 'summary' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'}`}>Summary</button>
+              <button onClick={() => setViewMode('detail')} className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${viewMode === 'detail' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'}`}>Detail</button>
+           </div>
+
+           <div className="relative flex-1 w-full md:max-w-md">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+              <input 
+                type="text" 
+                placeholder="Search Employee Name..." 
+                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+              />
+           </div>
+
+           <div className="flex gap-2 shrink-0">
+              <label className="btn-icon" title="Import CSV">
+                <FileUp size={18} />
+                <input type="file" accept=".csv" className="hidden" onChange={handleCSVImport} />
+              </label>
+              <button onClick={handleRefresh} className="btn-icon" title="Recalculate All"><RefreshCw size={18} /></button>
+              <button onClick={onSave} className="btn-icon" title="Save to Drive"><UploadCloud size={18} /></button>
+              <button onClick={() => setShowPrintWizard(true)} className="btn-primary flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg text-sm font-bold shadow-md"><Printer size={16} /> Finalize</button>
+           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-           {/* Employment Filter */}
-           <div className="relative">
-             <select 
-                className="pl-3 pr-8 py-2 border rounded-lg text-sm bg-gray-50 border-gray-200 focus:ring-2 focus:ring-blue-500 font-medium cursor-pointer outline-none"
-                value={empFilter}
-                onChange={(e) => setEmpFilter(e.target.value as EmploymentFilter)}
-             >
-                <option value="all">All Staff</option>
-                <option value="Full Time">Full Time</option>
-                <option value="PRN">PRN</option>
-             </select>
-           </div>
-
-           {/* Type Filter */}
-           <div className="relative">
-             <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-             <select 
-               className={`pl-10 pr-4 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 font-medium cursor-pointer outline-none ${filterMode !== 'all' ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-gray-50 border-gray-200'}`}
-               value={filterMode}
-               onChange={(e) => setFilterMode(e.target.value as FilterMode)}
-             >
-               <option value="all">Show All Items</option>
-               <option value="flagged">⚠️ Errors Only</option>
-               <option value="standby">🕰️ Standby Only</option>
-             </select>
-           </div>
-
-           <div className="h-6 w-px bg-gray-300 mx-1"></div>
-
-           <label className="btn-icon" title="Import CSV">
-             <FileUp size={18} />
-             <input type="file" accept=".csv" className="hidden" onChange={handleCSVImport} />
-           </label>
+        {/* Bottom Row: Filters */}
+        <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-gray-100">
+           <div className="flex items-center gap-2 text-xs font-bold text-gray-500 uppercase"><ListFilter size={14}/> Filters:</div>
            
-           <button onClick={handleRefresh} className="btn-icon" title="Refresh Rates"><RefreshCw size={18} /></button>
-           <button onClick={onSave} className="btn-icon" title="Save to Drive"><UploadCloud size={18} /></button>
-           <button onClick={() => setShowPrintWizard(true)} className="btn-primary flex items-center gap-2 bg-gray-900 text-white px-4 py-2 rounded-lg hover:bg-black font-medium shadow-md transition-all ml-2">
-             <Printer size={18} /> Finalize
-           </button>
+           <select className="filter-select" value={filterStatus} onChange={e => setFilterStatus(e.target.value as EmploymentFilter)}>
+              <option value="all">Status: All</option>
+              <option value="Full Time">Full Time</option>
+              <option value="PRN">PRN</option>
+           </select>
+
+           <select className="filter-select" value={filterLevel} onChange={e => setFilterLevel(e.target.value)}>
+              <option value="all">Rank: All</option>
+              {uniquePayLevels.map(l => <option key={l} value={l}>{l}</option>)}
+           </select>
+
+           <select className="filter-select" value={filterCode} onChange={e => setFilterCode(e.target.value)}>
+              <option value="all">Code: All</option>
+              {uniquePayCodes.map(c => <option key={c} value={c}>{c}</option>)}
+           </select>
+
+           <select className="filter-select" value={filterFlags} onChange={e => setFilterFlags(e.target.value as FilterMode)}>
+              <option value="all">Flags: Any</option>
+              <option value="flagged">⚠️ Errors Only</option>
+              <option value="standby">🕰️ Standby Only</option>
+           </select>
+
+           <div className="h-6 w-px bg-gray-300 mx-2"></div>
+
+           <select className="filter-select bg-gray-50 border-dashed" value={sortKey} onChange={e => { setSortKey(e.target.value as SortKey); setSortDir('asc'); }}>
+              <option value="name">Sort: Name</option>
+              <option value="payLevel">Sort: Rank</option>
+              <option value="employmentType">Sort: Status</option>
+              <option value="hours">Sort: Hours</option>
+              <option value="total">Sort: Total Pay</option>
+           </select>
         </div>
       </div>
 
-      {/* Content Area */}
+      {/* 3. DATA GRID */}
       <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden min-h-[500px]">
-        {/* SUMMARY View */}
+        
+        {/* SUMMARY VIEW */}
         {viewMode === 'summary' && (
           <div className="divide-y divide-gray-100">
              {groupedData.map((emp) => {
-               const isEmpOpen = !collapsedEmp.has(emp.name);
+               const isOpen = !collapsedEmp.has(emp.name);
                return (
-                 <div key={emp.name} className="bg-white">
-                   <div className="flex items-center justify-between p-4 hover:bg-gray-50 cursor-pointer transition-colors" onClick={() => toggleEmp(emp.name)}>
+                 <div key={emp.name} className="bg-white group">
+                   <div className="flex items-center justify-between p-4 hover:bg-gray-50 cursor-pointer transition-colors" onClick={() => {
+                      const newSet = new Set(collapsedEmp);
+                      if (newSet.has(emp.name)) newSet.delete(emp.name); else newSet.add(emp.name);
+                      setCollapsedEmp(newSet);
+                   }}>
                      <div className="flex items-center gap-3">
-                       <div className={`p-1 rounded-full transition-transform ${isEmpOpen ? 'rotate-90 bg-blue-100 text-blue-600' : 'text-gray-400'}`}><ChevronRight size={18} /></div>
+                       <div className={`p-1 rounded-full transition-transform ${isOpen ? 'rotate-90 bg-blue-100 text-blue-600' : 'text-gray-400'}`}><ChevronRight size={18} /></div>
                        <div>
                          <h3 className="font-bold text-gray-800 text-lg">{emp.name}</h3>
-                         <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">{emp.payLevel}</span>
+                         <div className="text-xs text-gray-500">{emp.payLevel}</div>
                        </div>
                      </div>
                      <div className="text-right">
@@ -383,45 +359,45 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
                      </div>
                    </div>
 
-                   {isEmpOpen && (
+                   {isOpen && (
                      <div className="bg-gray-50 border-t border-gray-100">
-                       {Object.entries(emp.codes).map(([code, stats]) => {
+                       {Object.entries(emp.codes).map(([code, stats]: [string, any]) => {
                          const codeId = `${emp.name}-${code}`;
-                         const isCodeExpanded = expandedCode.has(codeId);
+                         const isExpanded = expandedCode.has(codeId);
                          const def = rates.pay_codes.definitions.find(d => d.label === code);
                          const baseColor = def ? def.color : '#e2e8f0';
-                         const headerBg = `${baseColor}25`;
-                         const isFlatRate = def?.type === 'flat';
-
+                         
                          return (
                            <div key={code} className="border-b border-gray-100 last:border-0">
-                             <div className="flex items-center justify-between py-3 px-4 pl-12 cursor-pointer transition-colors border-l-4" style={{ backgroundColor: headerBg, borderLeftColor: baseColor }} onClick={() => toggleCode(codeId)}>
+                             <div className="flex items-center justify-between py-3 px-4 pl-12 cursor-pointer transition-colors border-l-4" 
+                                  style={{ backgroundColor: `${baseColor}25`, borderLeftColor: baseColor }} 
+                                  onClick={() => {
+                                    const newSet = new Set(expandedCode);
+                                    if (newSet.has(codeId)) newSet.delete(codeId); else newSet.add(codeId);
+                                    setExpandedCode(newSet);
+                                  }}>
                                <div className="flex items-center gap-2">
-                                  <div className={`transition-transform ${isCodeExpanded ? 'rotate-90 text-gray-700' : 'text-gray-500'}`}><ChevronRight size={14} /></div>
+                                  <div className={`transition-transform ${isExpanded ? 'rotate-90 text-gray-700' : 'text-gray-500'}`}><ChevronRight size={14} /></div>
                                   <span className="font-bold text-gray-800">{code}</span>
-                                  <span className="text-xs text-gray-600 opacity-70 ml-2">{isFlatRate ? `(${stats.totalHours.toFixed(2)} qty)` : `(${stats.totalHours.toFixed(2)} hrs)`}</span>
+                                  <span className="text-xs text-gray-600 opacity-70 ml-2">
+                                    {def?.type === 'flat' ? `(${stats.rows.length} qty)` : `(${stats.totalHours.toFixed(2)} hrs)`}
+                                  </span>
                                </div>
-                               <div className="text-right flex gap-6 text-sm">
-                                  <span className="w-24 font-mono font-bold text-gray-900">${stats.totalPay.toFixed(2)}</span>
-                               </div>
+                               <div className="text-right"><span className="font-mono font-bold text-gray-900">${stats.totalPay.toFixed(2)}</span></div>
                              </div>
 
-                             {isCodeExpanded && (
+                             {isExpanded && (
                                <div className="bg-white pl-16 pr-4 py-2 shadow-inner">
                                  <table className="w-full text-xs text-left">
                                    <thead>
                                      <tr className="text-gray-400 border-b border-gray-100">
-                                       <th className="py-2 font-normal w-24">Date</th>
-                                       <th className="py-2 font-normal w-32">Time</th>
-                                       <th className="py-2 font-normal text-right">Hrs/Qty</th>
-                                       <th className="py-2 font-normal text-right">Rate</th>
-                                       <th className="py-2 font-normal text-right">Total</th>
-                                       <th className="py-2 font-normal text-center w-24">Flags</th>
-                                       <th className="py-2 font-normal text-right">Action</th>
+                                       <th className="py-2 w-24">Date</th><th className="py-2 w-32">Time</th><th className="py-2 text-right">Hrs/Qty</th>
+                                       <th className="py-2 text-right">Rate</th><th className="py-2 text-right">Total</th>
+                                       <th className="py-2 text-center w-20">Flags</th><th className="py-2 text-right">Action</th>
                                      </tr>
                                    </thead>
                                    <tbody>
-                                     {stats.rows.map(row => (
+                                     {stats.rows.map((row: PayrollRow) => (
                                        <tr key={row.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50">
                                          <td className="py-2 text-gray-600">{row.startDate || '-'}</td>
                                          <td className="py-2 text-gray-600 text-[10px]">{row.startTime ? `${row.startTime} - ${row.endTime}` : '-'}</td>
@@ -429,11 +405,9 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
                                          <td className="py-2 text-right text-gray-500">{row.manual_rate_override ? `*${row.manual_rate_override}` : row.rate}</td>
                                          <td className="py-2 text-right font-medium">${getEffectiveTotal(row).toFixed(2)}</td>
                                          <td className="py-2 text-center">
-                                            {row.alert && <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold ${row.alertLevel === 'error' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}><AlertTriangle size={8} /> {row.alert}</div>}
+                                            {row.alert && <div className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold ${row.alertLevel === 'error' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>! {row.alert}</div>}
                                          </td>
-                                         <td className="py-2 text-right">
-                                           <button onClick={() => setEditingRow(row)} className="text-blue-600 hover:underline">Edit</button>
-                                         </td>
+                                         <td className="py-2 text-right"><button onClick={() => setEditingRow(row)} className="text-blue-600 hover:underline">Edit</button></td>
                                        </tr>
                                      ))}
                                    </tbody>
@@ -450,8 +424,8 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
              })}
           </div>
         )}
-        
-        {/* DETAIL View with Sorting */}
+
+        {/* DETAIL VIEW */}
         {viewMode === 'detail' && (
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
@@ -470,30 +444,22 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
               </thead>
               <tbody>
                 {filteredData.length === 0 ? (
-                  <tr><td colSpan={9} className="p-8 text-center text-gray-400">No data found matching your filters.</td></tr>
+                  <tr><td colSpan={9} className="p-12 text-center text-gray-400">No rows match your filters.</td></tr>
                 ) : (
                   pagedData.map((row) => {
                     const baseColor = getRowColor(row.code, rates);
-                    const rowBg = `${baseColor}20`; 
-                    const effectiveTotal = getEffectiveTotal(row);
-
                     return (
-                      <tr key={row.id} style={{ backgroundColor: rowBg }} className="hover:brightness-95 transition-all group border-b border-white">
+                      <tr key={row.id} style={{ backgroundColor: `${baseColor}15` }} className="hover:brightness-95 transition-all border-b border-white">
                         <td className="p-3">
                           <div className="font-bold text-gray-800 text-sm">{row.name}</div>
-                          <div className="text-xs text-gray-500">{row.payLevel} <span className="opacity-50">({row.employmentType || 'PRN'})</span></div>
+                          <div className="text-xs text-gray-500">{row.payLevel} <span className="opacity-60">({row.employmentType || 'PRN'})</span></div>
                         </td>
-                        <td className="p-3">
-                          <span className="font-medium text-gray-700 text-sm">{row.code}</span>
-                          {row.manual_note && <div className="text-[10px] text-blue-600 mt-0.5">{row.manual_note}</div>}
-                        </td>
-                        <td className="p-3 text-sm text-gray-700">{row.startDate || <span className="text-gray-300">-</span>}</td>
-                        <td className="p-3 text-xs text-gray-600 font-mono">{row.startTime ? `${row.startTime} - ${row.endTime}` : <span className="text-gray-300">-</span>}</td>
+                        <td className="p-3"><span className="font-medium text-gray-700 text-sm">{row.code}</span>{row.manual_note && <div className="text-[10px] text-blue-600">📝 {row.manual_note}</div>}</td>
+                        <td className="p-3 text-sm text-gray-700">{row.startDate || '-'}</td>
+                        <td className="p-3 text-xs text-gray-600 font-mono">{row.startTime ? `${row.startTime}-${row.endTime}` : '-'}</td>
                         <td className="p-3 text-right font-mono text-sm">{row.hours.toFixed(2)}</td>
-                        <td className="p-3 text-right font-mono text-xs text-gray-500">
-                          {row.manual_rate_override ? <span className="bg-yellow-100 text-yellow-800 px-1 rounded font-bold" title="Manual Override">${row.manual_rate_override.toFixed(2)}</span> : (row.rate !== null ? `$${row.rate.toFixed(2)}` : '-')}
-                        </td>
-                        <td className="p-3 text-right font-bold text-gray-800 font-mono text-sm">${effectiveTotal.toFixed(2)}</td>
+                        <td className="p-3 text-right font-mono text-xs text-gray-500">{row.manual_rate_override ? <span className="bg-yellow-100 text-yellow-800 px-1 rounded font-bold">${row.manual_rate_override}</span> : (row.rate !== null ? `$${row.rate.toFixed(2)}` : '-')}</td>
+                        <td className="p-3 text-right font-bold text-gray-800 font-mono text-sm">${getEffectiveTotal(row).toFixed(2)}</td>
                         <td className="p-3 text-center">
                            {row.alert && <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-bold ${row.alertLevel === 'error' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}><AlertTriangle size={10} /> {row.alert}</div>}
                         </td>
@@ -506,12 +472,14 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
                 )}
               </tbody>
             </table>
+            
+            {/* PAGINATION */}
             {filteredData.length > pageSize && (
               <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 text-sm bg-gray-50">
-                <span className="text-gray-500">Page {currentPage} of {totalPages} • {filteredData.length} rows</span>
+                <span className="text-gray-500">Page {currentPage} of {totalPages} • {filteredData.length} items</span>
                 <div className="flex items-center gap-2">
-                  <button type="button" className="btn-secondary" onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))} disabled={currentPage === 1}>Previous</button>
-                  <button type="button" className="btn-secondary" onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))} disabled={currentPage === totalPages}>Next</button>
+                  <button className="btn-secondary" onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}>Previous</button>
+                  <button className="btn-secondary" onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}>Next</button>
                 </div>
               </div>
             )}
@@ -530,7 +498,26 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
         />
       )}
 
-      {showPrintWizard && <PrintWizard data={data} onClose={() => setShowPrintWizard(false)} rates={rates} />}
+      {showPrintWizard && <PrintWizard data={filteredData} onClose={() => setShowPrintWizard(false)} rates={rates} employees={employees} />}
+
+      <style>{`
+        .filter-select {
+           padding: 0.35rem 2rem 0.35rem 0.75rem;
+           border: 1px solid #e5e7eb;
+           border-radius: 0.5rem;
+           font-size: 0.875rem;
+           font-weight: 500;
+           color: #374151;
+           outline: none;
+           background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+           background-position: right 0.5rem center;
+           background-repeat: no-repeat;
+           background-size: 1.5em 1.5em;
+           appearance: none;
+           cursor: pointer;
+        }
+        .filter-select:focus { border-color: #3b82f6; ring: 2px solid #93c5fd; }
+      `}</style>
     </div>
   );
 }

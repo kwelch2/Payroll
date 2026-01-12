@@ -33,7 +33,7 @@ export interface MasterRates {
 
 export interface Employee {
   id: string;
-  employee_id?: string;
+  employee_id?: string; 
   personal: {
     full_name: string;
     first_name: string;
@@ -49,7 +49,7 @@ export interface Employee {
   classifications: {
     pay_level: string;
     rank: string;
-    employment_type?: 'Full Time' | 'PRN'; // <--- ADDED THIS
+    employment_type?: 'Full Time' | 'PRN'; // <--- Ensure this is here
     officer_rank?: string;
     fire_status?: string;
     ems_cert?: string;
@@ -84,7 +84,7 @@ export interface PayrollRow {
   id: string;
   name: string;
   payLevel: string;
-  employmentType?: string; // <--- ADDED THIS FOR FILTERING
+  employmentType?: string; // Optional helper
   code: string;
   hours: number;
   rate: number | null;
