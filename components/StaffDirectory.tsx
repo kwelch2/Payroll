@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Search, UserPlus, Edit2, Trash2, X, User, DollarSign, Calendar, MapPin, Briefcase } from 'lucide-react';
 import { Employee, MasterRates, AppConfig } from '../types';
+import { normalizeShiftSchedule } from '../services/leaveService';
 import { useFeedback } from './FeedbackProvider';
 
 interface StaffDirectoryProps {
@@ -93,12 +94,7 @@ export default function StaffDirectory({ employees, setEmployees, rates, config 
   };
 
   // *** FIXED: Helper to interpret old data like "10-Hour Shift" as just "10" ***
-  const getShiftValue = (raw: string | undefined) => {
-    if (!raw) return '12'; // Default
-    if (raw.includes('10')) return '10';
-    if (raw.includes('12')) return '12';
-    return '12';
-  };
+  const getShiftValue = (raw: string | undefined) => normalizeShiftSchedule(raw);
 
   return (
     <div className="flex flex-col h-full bg-white">
@@ -338,7 +334,7 @@ export default function StaffDirectory({ employees, setEmployees, rates, config 
                         <select 
                             className="input-std border-amber-300 focus:ring-amber-500 bg-white" 
                             /* Fix: Reads old data ("12-Hour") as "12", so dropdown works */
-                            value={getShiftValue(fullEditEmp.classifications.shift_schedule)} 
+                            value={getShiftValue((fullEditEmp.classifications as any).shift_schedule ?? (fullEditEmp.classifications as any).shift_Schedule)} 
                             onChange={e => updateClass('shift_schedule', e.target.value)}
                         >
                            <option value="12">12-Hour Shift (48hr Week)</option>

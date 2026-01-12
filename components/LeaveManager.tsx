@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Employee, LeaveTransaction } from '../types';
-import { calculateMonthlyAccrual, checkAnniversaryCap } from '../services/leaveService';
+import { calculateMonthlyAccrual, checkAnniversaryCap, formatShiftLabel } from '../services/leaveService';
 import { PlayCircle, ShieldCheck, Briefcase, Calendar, TrendingUp, LayoutGrid, List } from 'lucide-react';
 import { useFeedback } from './FeedbackProvider';
 
@@ -172,7 +172,8 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
                  const vac = emp.leave_bank?.vacation_balance || 0;
                  const pers = emp.leave_bank?.personal_balance || 0;
                  const total = vac + pers;
-                 const shift = emp.classifications.shift_schedule || '10-Hour'; // Default if missing
+                 const rawShift = (emp.classifications as any).shift_schedule ?? (emp.classifications as any).shift_Schedule;
+                 const shift = rawShift ? formatShiftLabel(rawShift) : 'Unknown';
                  const stats = calculateMonthlyAccrual(emp);
 
                  return (
@@ -307,7 +308,7 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
                             return (
                                 <tr key={emp.id} className="hover:bg-blue-50 transition-colors cursor-pointer" onClick={() => { setSelectedEmpId(emp.id); setViewMode('list'); }}>
                                     <td className="p-4 font-bold text-gray-900">{emp.personal.full_name}</td>
-                                    <td className="p-4 text-gray-600">{emp.classifications.shift_schedule || 'Unknown'}</td>
+                                    <td className="p-4 text-gray-600">{(emp.classifications as any).shift_schedule || (emp.classifications as any).shift_Schedule ? formatShiftLabel((emp.classifications as any).shift_schedule ?? (emp.classifications as any).shift_Schedule) : 'Unknown'}</td>
                                     <td className="p-4 text-gray-600 font-mono">{emp.classifications.ft_start_date || '---'}</td>
                                     <td className="p-4 text-center font-bold text-blue-600">{stats.yearsOfService.toFixed(1)}</td>
                                     <td className="p-4 text-right text-green-700 font-mono">+{stats.totalMonthly.toFixed(2)}</td>

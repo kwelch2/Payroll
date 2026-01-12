@@ -1,11 +1,29 @@
 import { Employee, LeaveTransaction } from '../types';
 
+type NormalizedShiftSchedule = '10' | '12';
+
+export function normalizeShiftSchedule(raw?: string): NormalizedShiftSchedule {
+  const value = (raw || '').toString();
+  if (value.includes('10')) return '10';
+  if (value.includes('12') || value.includes('48')) return '12';
+  return '12';
+}
+
+export function formatShiftLabel(raw?: string): string {
+  return normalizeShiftSchedule(raw) === '12' ? '12-Hour Shift' : '10-Hour Shift';
+}
+
+function getShiftScheduleValue(employee: Employee): string | undefined {
+  const classifications: any = employee.classifications;
+  return classifications.shift_schedule ?? classifications.shift_Schedule;
+}
+
 /**
  * Calculates the monthly accrual amounts based on Years of Service and Shift Type.
  */
 export function calculateMonthlyAccrual(employee: Employee) {
   const startDate = employee.classifications.ft_start_date;
-  const shiftType = employee.classifications.shift_schedule || "10"; // Default to 10 if missing
+  const shiftType = normalizeShiftSchedule(getShiftScheduleValue(employee));
 
   // Defaults for missing data
   if (!startDate || employee.classifications.employment_type !== 'Full Time') {
@@ -34,9 +52,7 @@ export function calculateMonthlyAccrual(employee: Employee) {
   years = Math.max(0, years);
 
   // 2. Determine Day Value (Hours)
-  // FIX: Loose check for "12" anywhere in the string ("12", "12-Hour", etc.)
-  const is12Hour = shiftType.includes('12') || shiftType.includes('48');
-  const hoursPerDay = is12Hour ? 12 : 10;
+  const hoursPerDay = shiftType === '12' ? 12 : 10;
 
   // 3. Determine Vacation Days Per Year
   let vacationDays = 0;
@@ -112,16 +128,15 @@ export function processLeaveUsage(employee: Employee, hoursUsed: number, date: s
 
 export function checkAnniversaryCap(employee: Employee): Employee {
   const bank = employee.leave_bank;
-  const shiftType = employee.classifications.shift_schedule || "";
+  const shiftType = normalizeShiftSchedule(getShiftScheduleValue(employee));
   
   if (!bank) return employee;
 
   bank.personal_balance = bank.personal_balance || 0;
   bank.vacation_balance = bank.vacation_balance || 0;
 
-  // Same robust check for cap
-  const cap = (shiftType.includes('12') || shiftType.includes('48')) ? 60 : 50;
-  
+  const cap = shiftType === '12' ? 60 : 50;
+
   if (bank.personal_balance > cap) {
     const forfeitAmount = bank.personal_balance - cap;
     bank.personal_balance = cap;
