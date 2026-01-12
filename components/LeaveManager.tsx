@@ -23,7 +23,7 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
   const ftStaff = employees.filter(e => e.classifications.employment_type === 'Full Time');
   const selectedEmp = employees.find(e => e.id === selectedEmpId);
 
-  // --- 1. RUN MONTHLY ACCRUALS (With Duplicate Check) ---
+   // --- 1. RUN MONTHLY ACCRUALS (With Duplicate Check) ---
   const handleRunMonthly = async () => {
     // Check how many have already run this month
     const currentMonth = new Date().toISOString().slice(0, 7); // "2024-03"
