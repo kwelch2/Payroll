@@ -7,7 +7,6 @@ interface LayoutProps {
   onTabChange: (tab: string) => void;
   userEmail: string;
   onLogout: () => void;
-  // New Prop
   systemStatus: { rates: boolean; employees: boolean; config: boolean; };
   authStatus: string;
 }
@@ -61,7 +60,8 @@ export default function Layout({ children, activeTab, onTabChange, userEmail, on
           
           {/* Logo Area */}
           <div className="flex items-center gap-3 w-64">
-             <div className="w-8 h-8 bg-red-700 rounded-lg flex items-center justify-center text-white font-bold text-lg shadow-sm">G</div>
+             {/* UPDATED: Uses logo.jpg from public folder */}
+             <img src="/logo.jpg" alt="Gem Payroll" className="w-10 h-10 object-contain" />
              <div className="leading-tight">
                <h1 className="font-bold text-gray-900 tracking-tight">Gem Payroll</h1>
                <div className="flex items-center gap-1.5">

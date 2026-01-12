@@ -216,6 +216,127 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
 
   useEffect(() => { setRenderAll(false); }, [search, selectedStatus, selectedLevels, selectedCodes, sortField, sortAsc]);
 
+  const SummaryView = () => (
+    <div className="space-y-6">
+      <div className="text-center border-b-2 border-black pb-2 mb-4">
+        <h3 className="font-bold text-xl uppercase tracking-widest">Payroll Summary Report</h3>
+        <p className="text-xs text-gray-500">Grouped by Employee • {finalPrintData.length} records found</p>
+      </div>
+
+      <div className="space-y-6">
+        {summaryGroups.map((emp) => (
+          // CHANGED: Thicker border here (border-2 border-slate-800)
+          <div key={emp.name} className="break-inside-avoid border-2 border-slate-800 rounded-lg overflow-hidden shadow-sm">
+            <div className="bg-gray-100 p-3 flex justify-between items-center border-b-2 border-slate-300">
+               <div>
+                 <span className="font-bold text-gray-900 text-sm">{emp.name}</span>
+                 <span className="mx-2 text-gray-400">|</span>
+                 <span className="text-[10px] text-gray-600 uppercase tracking-wider font-bold">{emp.payLevel}</span>
+                 <span className="mx-2 text-gray-400">|</span>
+                 <span className="text-[10px] text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full font-bold border border-blue-200">{emp.status}</span>
+               </div>
+               <div className="text-right">
+                 <span className="font-mono font-bold text-sm text-gray-900">${emp.grandTotal.toFixed(2)}</span>
+               </div>
+            </div>
+            <table className="w-full text-xs">
+               <tbody>
+                 {Array.from(emp.codes.values()).map((code) => (
+                   // CHANGED: Added border-b border-gray-300 to separate pay codes clearly
+                   <tr key={code.label} className="border-b border-gray-300 last:border-0" style={{ backgroundColor: `${code.color}10` }}>
+                     <td className="pl-4 py-2 w-1/2 flex items-center gap-2 font-medium text-gray-700">
+                        <div className="w-2 h-2 rounded-full border border-gray-400" style={{ backgroundColor: code.color }}></div>
+                        {code.label}
+                     </td>
+                     <td className="py-2 text-right w-1/4 text-gray-600 font-mono">{code.hours.toFixed(2)} {code.label.toLowerCase().includes('flat') ? 'qty' : 'hrs'}</td>
+                     <td className="pr-4 py-2 text-right w-1/4 font-mono font-bold text-gray-800">${code.total.toFixed(2)}</td>
+                   </tr>
+                 ))}
+                 <tr className="bg-white border-t-2 border-gray-300">
+                    <td className="pl-4 py-2 font-bold text-gray-500 uppercase text-[10px]">Total</td>
+                    <td className="py-2 text-right font-bold text-gray-900">{emp.totalHours.toFixed(2)} hrs</td>
+                    <td className="pr-4 py-2 text-right font-black text-gray-900 text-sm">${emp.grandTotal.toFixed(2)}</td>
+                 </tr>
+               </tbody>
+            </table>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-8 border-t-2 border-black pt-4 flex justify-between items-center text-sm font-bold">
+         <span>Grand Total (All Employees)</span>
+         <span className="text-xl">${summaryGroups.reduce((acc, e) => acc + e.grandTotal, 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+      </div>
+    </div>
+  );
+
+  const DetailView = () => (
+    <div>
+      <div className="text-center border-b-2 border-black pb-2 mb-4">
+        <h3 className="font-bold text-xl uppercase tracking-widest">Detailed Audit Log</h3>
+        <p className="text-xs text-gray-500">Line-by-line breakdown • Sorted by {sortField}</p>
+        {processedData.length > previewLimit && !renderAll && (
+          <div className="mt-2 text-[10px] text-amber-600 font-medium">
+            Showing first {previewLimit} rows for performance. Use “Render All” before printing.
+          </div>
+        )}
+      </div>
+
+      <table className="w-full text-left border-collapse text-[10px] md:text-xs">
+         <thead>
+           <tr className="border-b-2 border-slate-900 bg-gray-50 text-slate-500 uppercase tracking-wider font-bold">
+             <th className="py-2 px-2">Employee</th>
+             <th className="py-2 px-2">Status</th>
+             <th className="py-2 px-2">Pay Code</th>
+             <th className="py-2 px-2">Date</th>
+             <th className="py-2 px-2 text-right">Hrs/Qty</th>
+             <th className="py-2 px-2 text-right">Rate</th>
+             <th className="py-2 px-2 text-right">Total</th>
+           </tr>
+         </thead>
+         <tbody>
+           {(renderAll ? finalPrintData : finalPrintData.slice(0, previewLimit)).map((row, i) => {
+             const pay = row.manual_rate_override !== undefined && row.manual_rate_override !== null
+               ? row.manual_rate_override * (rates.pay_codes.definitions.find(d => d.label === row.code)?.type === 'flat' ? 1 : row.hours)
+               : (row.total || 0);
+             const color = getCodeColor(row.code);
+             const status = row.employmentType || empStatusMap.get(row.name) || 'PRN';
+
+             return (
+               <tr key={i} className="border-b border-gray-100 break-inside-avoid" style={{ backgroundColor: `${color}15` }}>
+                 <td className="py-1.5 px-2 font-medium text-gray-900">
+                    {row.name}
+                    <div className="text-[9px] text-gray-400 font-normal">{row.payLevel}</div>
+                 </td>
+                 <td className="py-1.5 px-2">
+                    <span className="text-[9px] font-bold text-gray-500 bg-white border border-gray-200 px-1.5 py-0.5 rounded">{status}</span>
+                 </td>
+                 <td className="py-1.5 px-2 font-medium text-gray-700">{row.code}</td>
+                 <td className="py-1.5 px-2 text-gray-500">{row.startDate || '-'}</td>
+                 <td className="py-1.5 px-2 text-right font-mono text-gray-600">{row.hours.toFixed(2)}</td>
+                 <td className="py-1.5 px-2 text-right font-mono text-gray-400">{row.manual_rate_override ? `*${row.manual_rate_override}` : (row.rate ?? '-')}</td>
+                 <td className="py-1.5 px-2 text-right font-mono font-bold text-gray-900">${pay.toFixed(2)}</td>
+               </tr>
+             )
+           })}
+         </tbody>
+         <tfoot>
+           <tr className="bg-gray-100 font-bold border-t-2 border-black text-sm">
+              <td colSpan={4} className="py-2 px-1 text-right">Report Totals:</td>
+              <td className="py-2 px-1 text-right">{processedData.reduce((acc, r) => acc + r.hours, 0).toFixed(2)}</td>
+              <td></td>
+              <td className="py-2 px-1 text-right">${processedData.reduce((acc, r) => {
+                 const p = r.manual_rate_override !== undefined && r.manual_rate_override !== null
+                   ? r.manual_rate_override * (rates.pay_codes.definitions.find(d => d.label === r.code)?.type === 'flat' ? 1 : r.hours)
+                   : (r.total || 0);
+                 return acc + p;
+              }, 0).toFixed(2)}</td>
+           </tr>
+         </tfoot>
+      </table>
+    </div>
+  );
+
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
       <div ref={modalRef} tabIndex={-1} className="bg-white w-full max-w-7xl h-[95vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-gray-700 ring-1 ring-white/10">
@@ -321,139 +442,59 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
            </div>
 
            {/* PREVIEW AREA */}
-           <div className="flex-1 bg-gray-100 overflow-y-auto p-4 md:p-8 relative">
-              <div id="print-area" className="max-w-[1000px] mx-auto min-h-[1000px] bg-white p-8 md:p-12 shadow-sm border border-gray-200 print:shadow-none print:border-none print:p-0 print:w-full">
-                 <div className="flex justify-between items-start border-b-4 border-slate-900 pb-6 mb-8">
-                    <div className="flex items-center gap-5">
-                       <div className="w-16 h-16 bg-red-700 text-white rounded-lg flex items-center justify-center text-3xl font-black print:border print:border-red-700">G</div>
+           <div className="flex-1 bg-white overflow-y-auto p-8 relative">
+              <div id="print-area" className="max-w-[1100px] mx-auto min-h-[1000px] bg-white print:p-0 print:w-full">
+                 
+                 {/* Print Header */}
+                 <div className="flex justify-between items-start border-b-4 border-slate-900 pb-4 mb-6">
+                    <div className="flex items-center gap-4">
+                       {/* UPDATED: Uses logo.jpg from public folder */}
+                       <img src="/logo.jpg" alt="Gem Payroll" className="w-16 h-16 object-contain" />
                        <div>
-                          <h1 className="text-3xl font-black uppercase tracking-tight text-slate-900">Gem County Payroll</h1>
-                          <div className="flex flex-col text-xs font-medium text-slate-500 mt-1">
+                          <h1 className="text-2xl font-black uppercase tracking-tight text-slate-900">Gem County Payroll</h1>
+                          <div className="flex gap-4 text-xs font-medium text-slate-500 mt-1">
                              <span>Run Date: {new Date().toLocaleDateString()}</span>
-                             <span>Report: {layout === 'summary' ? 'Payroll Summary' : 'Detailed Audit Log'}</span>
+                             <span>•</span>
+                             <span>Status: Final Draft</span>
                           </div>
                        </div>
-                    </div>
-                    <div className="text-right flex flex-col items-end">
-                       <div className="text-xs text-slate-400 uppercase font-bold tracking-wider mb-1">Items Included</div>
-                       <div className="text-2xl font-black text-slate-900">{finalPrintData.length}</div>
-                       <div className="text-[10px] text-slate-400 mt-1">{selectionMode === 'custom' ? 'Custom Selection' : 'Filtered List'}</div>
-                    </div>
-                 </div>
-
-                 <div className="print-content space-y-8">
-                    
-                    {/* Summary View */}
-                    {layout === 'summary' && (
-                      <div className="space-y-6">
-                        {summaryGroups.map((emp) => (
-                          <div key={emp.name} className="break-inside-avoid border border-gray-200 rounded-lg overflow-hidden">
-                            <div className="bg-gray-50 p-3 flex justify-between items-center border-b border-gray-200">
-                               <div>
-                                 <span className="font-bold text-gray-900 text-sm">{emp.name}</span>
-                                 <span className="mx-2 text-gray-300">|</span>
-                                 <span className="text-[10px] text-gray-500 uppercase tracking-wider font-bold">{emp.payLevel}</span>
-                                 <span className="mx-2 text-gray-300">|</span>
-                                 <span className="text-[10px] text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full font-bold">{emp.status}</span>
-                               </div>
-                               <div className="text-right">
-                                 <span className="font-mono font-bold text-sm text-gray-900">${emp.grandTotal.toFixed(2)}</span>
-                               </div>
-                            </div>
-                            <table className="w-full text-xs">
-                               <tbody>
-                                 {Array.from(emp.codes.values()).map((code) => (
-                                   <tr key={code.label} className="border-b border-gray-50 last:border-0" style={{ backgroundColor: `${code.color}10` }}>
-                                     <td className="pl-4 py-1.5 w-1/2 flex items-center gap-2 font-medium text-gray-700">
-                                        <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: code.color }}></div>
-                                        {code.label}
-                                     </td>
-                                     <td className="py-1.5 text-right w-1/4 text-gray-600">{code.hours.toFixed(2)} {code.label.toLowerCase().includes('flat') ? 'qty' : 'hrs'}</td>
-                                     <td className="pr-4 py-1.5 text-right w-1/4 font-mono font-medium">${code.total.toFixed(2)}</td>
-                                   </tr>
-                                 ))}
-                                 <tr className="bg-white">
-                                    <td className="pl-4 py-2 font-bold text-gray-400 uppercase text-[10px]">Total</td>
-                                    <td className="py-2 text-right font-bold text-gray-700">{emp.totalHours.toFixed(2)} hrs</td>
-                                    <td className="pr-4 py-2 text-right font-bold text-gray-900">${emp.grandTotal.toFixed(2)}</td>
-                                 </tr>
-                               </tbody>
-                            </table>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Detailed View */}
-                    {layout === 'detail' && (
-                      <div>
-                        <table className="w-full text-left border-collapse text-[10px] md:text-xs">
-                           <thead>
-                             <tr className="border-b-2 border-slate-900 bg-gray-50 text-slate-500 uppercase tracking-wider font-bold">
-                               <th className="py-2 px-2">Employee</th>
-                               <th className="py-2 px-2">Status</th>
-                               <th className="py-2 px-2">Pay Code</th>
-                               <th className="py-2 px-2">Date</th>
-                               <th className="py-2 px-2 text-right">Hrs/Qty</th>
-                               <th className="py-2 px-2 text-right">Rate</th>
-                               <th className="py-2 px-2 text-right">Total</th>
-                             </tr>
-                           </thead>
-                           <tbody>
-                             {(renderAll ? finalPrintData : finalPrintData.slice(0, previewLimit)).map((row, i) => {
-                               const pay = row.manual_rate_override !== undefined && row.manual_rate_override !== null
-                                 ? row.manual_rate_override * (rates.pay_codes.definitions.find(d => d.label === row.code)?.type === 'flat' ? 1 : row.hours)
-                                 : (row.total || 0);
-                               const color = getCodeColor(row.code);
-                               const status = row.employmentType || empStatusMap.get(row.name) || 'PRN';
-
-                               return (
-                                 <tr key={i} className="border-b border-gray-100 break-inside-avoid" style={{ backgroundColor: `${color}15` }}>
-                                   <td className="py-1.5 px-2 font-medium text-gray-900">
-                                      {row.name}
-                                      <div className="text-[9px] text-gray-400 font-normal">{row.payLevel}</div>
-                                   </td>
-                                   <td className="py-1.5 px-2">
-                                      <span className="text-[9px] font-bold text-gray-500 bg-white border border-gray-200 px-1.5 py-0.5 rounded">{status}</span>
-                                   </td>
-                                   <td className="py-1.5 px-2 font-medium text-gray-700">{row.code}</td>
-                                   <td className="py-1.5 px-2 text-gray-500">{row.startDate || '-'}</td>
-                                   <td className="py-1.5 px-2 text-right font-mono text-gray-600">{row.hours.toFixed(2)}</td>
-                                   <td className="py-1.5 px-2 text-right font-mono text-gray-400">{row.manual_rate_override ? `*${row.manual_rate_override}` : (row.rate ?? '-')}</td>
-                                   <td className="py-1.5 px-2 text-right font-mono font-bold text-gray-900">${pay.toFixed(2)}</td>
-                                 </tr>
-                               )
-                             })}
-                           </tbody>
-                        </table>
-                        
-                        {finalPrintData.length > previewLimit && !renderAll && (
-                          <div className="mt-4 text-center no-print">
-                             <div className="text-xs text-amber-600 mb-2 font-bold">Preview Limited to {previewLimit} Rows</div>
-                             <button onClick={() => setRenderAll(true)} className="text-xs font-bold bg-amber-50 text-amber-700 px-3 py-2 rounded border border-amber-200 hover:bg-amber-100">
-                               Render All {finalPrintData.length} Rows for Printing
-                             </button>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                 </div>
-
-                 {/* Report Footer */}
-                 <div className="mt-12 pt-6 border-t-2 border-slate-900 grid grid-cols-2 gap-8 text-xs text-gray-500">
-                    <div>
-                       <div className="flex justify-between font-bold text-slate-900 mb-2 text-sm uppercase">
-                          <span>Grand Total</span>
-                          <span>${finalPrintData.reduce((acc, r) => acc + (r.total || 0), 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
-                       </div>
-                       <p>Authorized Signature: __________________________________</p>
                     </div>
                     <div className="text-right">
-                       <p>Generated by Gem Payroll System</p>
-                       <p className="mt-1">Date: {new Date().toLocaleString()}</p>
+                       <div className="text-xs text-slate-400 uppercase font-bold tracking-wider mb-1">Report Type</div>
+                       <div className="bg-slate-100 px-3 py-1 rounded text-sm font-bold text-slate-700 border border-slate-200">
+                         {layout === 'summary' ? 'Payroll Summary' : 'Detailed Audit Log'}
+                       </div>
                     </div>
                  </div>
 
+                 {/* Signatures Area */}
+                 <div className="mb-8 grid grid-cols-2 gap-12 bg-slate-50 p-4 rounded-lg border border-slate-100 print:bg-white print:border-none print:p-0">
+                    <div>
+                       <div className="h-8 border-b border-slate-400 mb-1"></div>
+                       <div className="flex justify-between text-[10px] uppercase font-bold text-slate-400">
+                          <span>Prepared By</span>
+                          <span>Date</span>
+                       </div>
+                    </div>
+                    <div>
+                       <div className="h-8 border-b border-slate-400 mb-1"></div>
+                       <div className="flex justify-between text-[10px] uppercase font-bold text-slate-400">
+                          <span>Authorized Signature</span>
+                          <span>Date</span>
+                       </div>
+                    </div>
+                 </div>
+
+                 {/* Content */}
+                 <div className="print-content">
+                    {layout === 'summary' && <SummaryView />}
+                    {layout === 'detail' && <DetailView />}
+                 </div>
+
+                 {/* Print Footer */}
+                 <div className="mt-8 pt-8 border-t border-gray-100 text-center text-[10px] text-gray-400">
+                    Generated by Gem Payroll System • Confidential Personnel Record
+                 </div>
               </div>
            </div>
         </div>
