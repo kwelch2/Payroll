@@ -1,26 +1,40 @@
-// services/leaveService.ts
 import { Employee, LeaveTransaction } from '../types';
 
 /**
  * Calculates the monthly accrual amounts based on Years of Service and Shift Type.
+ * Returns detailed info for UI display.
  */
-export function calculateMonthlyAccrual(employee: Employee): { vacation: number, personal: number, tier: string } {
+export function calculateMonthlyAccrual(employee: Employee) {
   const startDate = employee.classifications.ft_start_date;
   const shiftType = employee.classifications.shift_schedule;
 
-  // Safety Checks
+  // Defaults for missing data
   if (!startDate || !shiftType || employee.classifications.employment_type !== 'Full Time') {
-    return { vacation: 0, personal: 0, tier: 'N/A' };
+    return { 
+      vacation: 0, 
+      personal: 0, 
+      totalMonthly: 0,
+      tier: 'N/A', 
+      yearsOfService: 0,
+      yearlyAllowance: 0
+    };
   }
 
   // 1. Calculate Years of Service
   const start = new Date(startDate);
+  // Valid Date Check
+  if (isNaN(start.getTime())) {
+     return { vacation: 0, personal: 0, totalMonthly: 0, tier: 'Invalid Date', yearsOfService: 0, yearlyAllowance: 0 };
+  }
+
   const now = new Date();
   let years = now.getFullYear() - start.getFullYear();
   const m = now.getMonth() - start.getMonth();
   if (m < 0 || (m === 0 && now.getDate() < start.getDate())) {
     years--;
   }
+  // Prevent negative years if start date is in future
+  years = Math.max(0, years);
 
   // 2. Determine Day Value (Hours)
   const hoursPerDay = shiftType === '12-Hour' ? 12 : 10;
@@ -30,23 +44,23 @@ export function calculateMonthlyAccrual(employee: Employee): { vacation: number,
   let tierName = "";
 
   if (years < 1) { vacationDays = 10; tierName = "Year 0-1 (10 Days)"; }
-  else if (years < 5) { vacationDays = 10; tierName = "Year 1-5 (10 Days)"; } // Assumed gap fill
+  else if (years < 5) { vacationDays = 10; tierName = "Year 1-5 (10 Days)"; }
   else if (years < 10) { vacationDays = 15; tierName = "Year 5-10 (15 Days)"; }
   else if (years < 15) { vacationDays = 20; tierName = "Year 10-15 (20 Days)"; }
   else if (years < 20) { vacationDays = 25; tierName = "Year 15-20 (25 Days)"; }
   else { vacationDays = 30; tierName = "Year 20+ (30 Days)"; }
 
   // 4. Calculate Monthly Hours
-  // Formula: (Days * HoursPerDay) / 12 Months
   const vacationHours = (vacationDays * hoursPerDay) / 12;
-  
-  // Personal Leave is fixed at 5 Days/Year
   const personalHours = (5 * hoursPerDay) / 12;
 
   return {
     vacation: parseFloat(vacationHours.toFixed(4)),
     personal: parseFloat(personalHours.toFixed(4)),
-    tier: tierName
+    totalMonthly: parseFloat((vacationHours + personalHours).toFixed(4)),
+    tier: tierName,
+    yearsOfService: years,
+    yearlyAllowance: (vacationDays + 5) * hoursPerDay
   };
 }
 
@@ -55,8 +69,12 @@ export function calculateMonthlyAccrual(employee: Employee): { vacation: number,
  * Automatically deducts from Personal Leave first, then Vacation.
  */
 export function processLeaveUsage(employee: Employee, hoursUsed: number, date: string, note: string): Employee {
-  // Initialize bank if missing
-  const bank = employee.leave_bank || { vacation_balance: 0, personal_balance: 0, history: [] };
+  // Initialize bank if missing, ensuring numbers are 0 not undefined
+  const bank = {
+    vacation_balance: employee.leave_bank?.vacation_balance || 0,
+    personal_balance: employee.leave_bank?.personal_balance || 0,
+    history: employee.leave_bank?.history || []
+  };
   
   let remaining = hoursUsed;
   let usedPersonal = 0;
@@ -78,7 +96,7 @@ export function processLeaveUsage(employee: Employee, hoursUsed: number, date: s
   // 2. Burn Vacation Leave Second
   if (remaining > 0) {
     usedVacation = remaining;
-    bank.vacation_balance -= remaining; // Allow to go negative if that's policy, or add check here
+    bank.vacation_balance -= remaining;
   }
 
   // 3. Log Transaction
@@ -103,13 +121,16 @@ export function processLeaveUsage(employee: Employee, hoursUsed: number, date: s
 
 /**
  * Checks for Anniversary Cap on Personal Leave.
- * Should be run once a year on the anniversary month.
  */
 export function checkAnniversaryCap(employee: Employee): Employee {
   const bank = employee.leave_bank;
   const shiftType = employee.classifications.shift_schedule;
   
   if (!bank || !shiftType) return employee;
+
+  // Ensure values exist
+  bank.personal_balance = bank.personal_balance || 0;
+  bank.vacation_balance = bank.vacation_balance || 0;
 
   const cap = shiftType === '12-Hour' ? 60 : 50;
   

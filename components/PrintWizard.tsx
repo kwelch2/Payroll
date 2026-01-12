@@ -119,13 +119,11 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
       return row.total || 0;
   };
 
-  // --- 3. FINAL SET FOR PRINTING ---
   const finalPrintData = useMemo(() => {
     if (selectionMode === 'all') return processedData;
     return processedData.filter(r => customSelectedIds.has(r.id));
   }, [processedData, selectionMode, customSelectedIds]);
 
-  // --- 4. AGGREGATION FOR SUMMARY ---
   const summaryGroups = useMemo(() => {
     const groups = new Map<string, {
       name: string,
@@ -174,13 +172,27 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
     return Array.from(groups.values());
   }, [finalPrintData, rates, empStatusMap]);
 
-  // --- UI HELPERS ---
   const handlePrint = () => {
     setRenderAll(true);
-    setTimeout(() => window.print(), 500);
+    // Slight delay to ensure render completes before print dialog
+    setTimeout(() => window.print(), 100);
   };
 
   const getCodeColor = (code: string) => rates.pay_codes.definitions.find(d => d.label === code)?.color || '#e2e8f0';
+
+  // --- KEYBOARD & FOCUS ---
+  useEffect(() => {
+    const modal = modalRef.current;
+    if (!modal) return;
+    modal.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); onClose(); }
+    };
+    modal.addEventListener('keydown', handleKeyDown);
+    return () => modal.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
+  useEffect(() => { setRenderAll(false); }, [search, selectedStatus, selectedLevels, selectedCodes, sortField, sortAsc]);
 
   const MultiSelectFilter = ({ title, options, selectedSet, setFunction, isOpen, toggleOpen }: any) => {
     const toggleItem = (val: string) => {
@@ -209,20 +221,6 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
     );
   };
 
-  // --- KEYBOARD & FOCUS ---
-  useEffect(() => {
-    const modal = modalRef.current;
-    if (!modal) return;
-    modal.focus();
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { event.preventDefault(); onClose(); }
-    };
-    modal.addEventListener('keydown', handleKeyDown);
-    return () => modal.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
-
-  useEffect(() => { setRenderAll(false); }, [search, selectedStatus, selectedLevels, selectedCodes, sortField, sortAsc]);
-
   const SummaryView = () => (
     <div className="space-y-6 print-container">
       {summaryGroups.map((emp) => (
@@ -247,8 +245,6 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
                       <div className="w-2 h-2 rounded-full border border-gray-400" style={{ backgroundColor: code.color }}></div>
                       {code.label}
                    </td>
-                   
-                   {/* Qty/Hrs Side-by-Side */}
                    <td className="py-2 text-right w-1/4 text-gray-700 font-mono">
                       {code.isFlat ? (
                           <div className="flex items-baseline justify-end gap-2">
@@ -262,7 +258,6 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
                           </div>
                       )}
                    </td>
-
                    <td className="pr-4 py-2 text-right w-1/4 font-mono font-bold text-gray-800">${code.total.toFixed(2)}</td>
                  </tr>
                ))}
@@ -275,7 +270,6 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
           </table>
         </div>
       ))}
-
       <div className="mt-8 border-t-2 border-black pt-4 flex justify-between items-center text-sm font-bold page-break-avoid">
          <span>Grand Total (All Employees)</span>
          <span className="text-xl">${summaryGroups.reduce((acc, e) => acc + e.grandTotal, 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
@@ -315,7 +309,6 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
                  </td>
                  <td className="py-1.5 px-2 font-medium text-gray-700">{row.code}</td>
                  <td className="py-1.5 px-2 text-gray-500">{row.startDate || '-'}</td>
-                 
                  <td className="py-1.5 px-2 text-right font-mono text-gray-600">
                     {isFlat ? (
                         <div className="flex items-baseline justify-end gap-1">
@@ -329,7 +322,6 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
                         </div>
                     )}
                  </td>
-
                  <td className="py-1.5 px-2 text-right font-mono text-gray-400">{row.manual_rate_override ? `*${row.manual_rate_override}` : (row.rate ?? '-')}</td>
                  <td className="py-1.5 px-2 text-right font-mono font-bold text-gray-900">${pay.toFixed(2)}</td>
                </tr>
@@ -375,9 +367,8 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
 
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden scroll-wrapper">
            
-           {/* SIDEBAR CONTROLS */}
+           {/* SIDEBAR */}
            <div className="w-full md:w-80 bg-slate-50 border-r border-gray-200 flex flex-col gap-5 p-5 no-print overflow-y-auto shrink-0">
-              
               <div className="space-y-2">
                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1"><LayoutList size={10}/> Report Layout</label>
                  <div className="grid grid-cols-2 gap-1 bg-white p-1 rounded-lg border border-gray-200 shadow-sm">
@@ -385,7 +376,6 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
                     <button onClick={() => setLayout('detail')} className={`py-2 text-xs font-bold rounded flex items-center justify-center gap-1 transition-all ${layout === 'detail' ? 'bg-blue-50 text-blue-700 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}>Detailed</button>
                  </div>
               </div>
-
               <div className="space-y-2">
                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1"><Users size={10}/> Include Rows</label>
                  <div className="grid grid-cols-1 gap-2">
@@ -393,9 +383,7 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
                     <button onClick={() => setSelectionMode('custom')} className={`text-left px-3 py-2 rounded-lg border text-xs font-medium transition-all ${selectionMode === 'custom' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'bg-white border-gray-200 text-gray-600'}`}>Custom Selection Only ({customSelectedIds.size})</button>
                  </div>
               </div>
-
               <hr className="border-gray-200" />
-
               <div className="space-y-4">
                 <div className="flex items-center gap-2 text-xs font-bold text-slate-400 uppercase tracking-wider"><Filter size={12} /> Filters</div>
                 <div className="relative">
@@ -413,7 +401,6 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
                 <MultiSelectFilter title="Pay Level" options={Array.from(new Set([...Object.keys(rates.pay_levels), 'Hourly Only'])).sort()} selectedSet={selectedLevels} setFunction={setSelectedLevels} isOpen={showLevelFilter} toggleOpen={() => { setShowLevelFilter(!showLevelFilter); setShowCodeFilter(false); }} />
                 <MultiSelectFilter title="Pay Code" options={rates.pay_codes.definitions.map(d => d.label).sort()} selectedSet={selectedCodes} setFunction={setSelectedCodes} isOpen={showCodeFilter} toggleOpen={() => { setShowCodeFilter(!showCodeFilter); setShowLevelFilter(false); }} />
               </div>
-
               <div className="space-y-2 pt-4 border-t border-gray-200">
                  <div className="flex items-center gap-2 text-xs font-bold text-slate-400 uppercase tracking-wider"><ArrowUpDown size={12} /> Sorting</div>
                  <div className="grid grid-cols-3 gap-2">
@@ -432,8 +419,6 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
                     </button>
                  </div>
               </div>
-
-              {/* SELECTION LIST FOR CUSTOM MODE */}
               {selectionMode === 'custom' && (
                 <div className="flex-1 flex flex-col bg-white border border-gray-200 rounded-lg shadow-inner overflow-hidden min-h-[200px]">
                    <div className="p-2 bg-gray-100 border-b border-gray-200 flex justify-between items-center">
@@ -453,7 +438,6 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
                    </div>
                 </div>
               )}
-
               <div className="mt-auto pt-4">
                 <button onClick={handlePrint} className="w-full btn-primary bg-slate-900 text-white py-3 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 hover:bg-black transform active:scale-95 transition-all">
                   <Printer size={18} /> Print Report
@@ -497,7 +481,7 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
                     {layout === 'detail' && <DetailView />}
                  </div>
 
-                 {/* Signatures Area - MOVED TO BOTTOM */}
+                 {/* Signatures Area */}
                  <div className="mt-12 mb-8 grid grid-cols-2 gap-12 bg-slate-50 p-4 rounded-lg border border-slate-100 print:bg-white print:border-none print:p-0 page-break-avoid">
                     <div>
                        <div className="h-8 border-b border-slate-400 mb-1"></div>
@@ -528,53 +512,43 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
         @media print {
           @page { margin: 15mm 10mm 15mm 10mm; }
           
-          /* RESET PAGE & HIDE EVERYTHING ELSE */
-          html, body {
-             margin: 0 !important;
-             padding: 0 !important;
-             height: auto !important;
-             overflow: visible !important;
-             visibility: hidden !important;
+          /* HIDE EVERYTHING INITIALLY */
+          body {
+            visibility: hidden;
+            background: white;
           }
-          
-          /* HIDE Sidebar and Modal UI */
-          .no-print, button, .lucide { display: none !important; }
-          
+          body > * { display: none; }
+
           /* RESET MODAL CONTAINERS */
           .modal-overlay {
-             position: static !important;
-             background: white !important;
              display: block !important;
+             position: static !important;
+             width: auto !important;
+             height: auto !important;
+             background: white !important;
              padding: 0 !important;
              margin: 0 !important;
-             width: 100% !important;
-             height: auto !important;
              visibility: visible !important;
           }
           .modal-container {
+             display: block !important;
+             position: static !important;
              width: 100% !important;
              max-width: none !important;
              height: auto !important;
              border: none !important;
              box-shadow: none !important;
              overflow: visible !important;
-             border-radius: 0 !important;
              visibility: visible !important;
           }
-          .scroll-wrapper {
-             overflow: visible !important;
+          .scroll-wrapper, .scroll-area {
              display: block !important;
              height: auto !important;
-             visibility: visible !important;
-          }
-          .scroll-area {
              overflow: visible !important;
-             height: auto !important;
-             padding: 0 !important;
              visibility: visible !important;
           }
           
-          /* POSITION PRINT AREA AT ABSOLUTE TOP */
+          /* FORCE PRINT AREA VISIBILITY & POSITION */
           #print-area {
              visibility: visible !important;
              position: absolute !important;
@@ -589,6 +563,9 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
           #print-area * {
              visibility: visible !important;
           }
+
+          /* HIDE UI ELEMENTS */
+          .no-print, button, .lucide { display: none !important; }
 
           /* PAGE BREAKS */
           .break-inside-avoid { break-inside: avoid; page-break-inside: avoid; }
