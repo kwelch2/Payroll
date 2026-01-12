@@ -34,6 +34,7 @@ export function calculatePayRow(
   }
 
   const systemCode = def.code; 
+  const isFlatRate = def.type === 'flat';
 
   // 3. Determine Rate Strategy
   let rate = 0;
@@ -59,7 +60,11 @@ export function calculatePayRow(
   }
 
   // 4. Calculate Total
-  const total = rate * hoursOrQty;
+  // CHANGED: If it's a Flat Rate, we assume the "hours" column is just the shift duration
+  // and should NOT multiply the rate. We treat it as 1 unit.
+  // For Hourly or Bank Draw, we multiply by hours/qty.
+  const multiplier = isFlatRate ? 1 : hoursOrQty;
+  const total = rate * multiplier;
 
   // 5. Generate Alert Flags
   let alert = "";
@@ -77,7 +82,7 @@ export function calculatePayRow(
     id: `row-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
     name: employee.personal.full_name,
     payLevel: employee.classifications.pay_level,
-    employmentType: employee.classifications.employment_type || 'PRN', // Default to PRN if missing
+    employmentType: employee.classifications.employment_type || 'PRN', 
     code: def.label, 
     hours: hoursOrQty,
     rate: rate,
