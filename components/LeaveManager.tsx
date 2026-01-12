@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
-import { Employee } from '../types';
-import { calculateMonthlyAccrual, checkAnniversaryCap, processLeaveUsage } from '../services/leaveService';
-import { Calendar, Clock, AlertTriangle, History, PlayCircle, X } from 'lucide-react';
+import { useState } from 'react';
+import { Employee, LeaveTransaction } from '../types';
+import { calculateMonthlyAccrual, checkAnniversaryCap } from '../services/leaveService';
+import { PlayCircle, ShieldCheck } from 'lucide-react';
 import { useFeedback } from './FeedbackProvider';
 
 interface LeaveManagerProps {
@@ -12,22 +12,24 @@ interface LeaveManagerProps {
 export default function LeaveManager({ employees, setEmployees }: LeaveManagerProps) {
   const { notify, confirm } = useFeedback();
   const [selectedEmpId, setSelectedEmpId] = useState<string | null>(null);
+  const [showAdjustModal, setShowAdjustModal] = useState(false);
+  
+  // Adjustment Form State
+  const [adjType, setAdjType] = useState<'Add' | 'Subtract'>('Add');
+  const [adjAmount, setAdjAmount] = useState('');
+  const [adjNote, setAdjNote] = useState('');
 
-  // Filter only Full Time staff
   const ftStaff = employees.filter(e => e.classifications.employment_type === 'Full Time');
-
   const selectedEmp = employees.find(e => e.id === selectedEmpId);
 
-  // --- BULK ACTION: Run Monthly Accruals ---
+  // --- 1. RUN MONTHLY ACCRUALS ---
   const handleRunMonthly = async () => {
-    if (!await confirm({ title: 'Run Monthly Accruals?', message: 'This will add Vacation & Personal hours to all active Full Time staff based on their tenure. Continue?', confirmLabel: 'Run Accruals' })) return;
+    if (!await confirm({ title: 'Run Monthly Accruals?', message: 'This will add Vacation & Personal hours to all active Full Time staff based on tenure. Proceed?', confirmLabel: 'Run Accruals' })) return;
 
     const updatedStaff = employees.map(emp => {
       if (emp.classifications.employment_type !== 'Full Time' || emp.classifications.pto_status === 'Frozen') return emp;
 
       const { vacation, personal, tier } = calculateMonthlyAccrual(emp);
-      
-      // Init bank if missing
       const bank = emp.leave_bank || { vacation_balance: 0, personal_balance: 0, history: [] };
       
       const newBank = {
@@ -48,7 +50,6 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
           ...bank.history
         ]
       };
-
       return { ...emp, leave_bank: newBank as any };
     });
 
@@ -56,17 +57,58 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
     notify('success', `Accruals processed for ${ftStaff.length} employees.`);
   };
 
-  // --- SINGLE ACTION: Run Audit/Cap Check ---
-  const handleRunAudit = (emp: Employee) => {
-    const updated = checkAnniversaryCap(emp);
-    setEmployees(employees.map(e => e.id === emp.id ? updated : e));
-    notify('success', 'Anniversary Cap check complete.');
+  // --- 2. MANUAL ADJUSTMENT (For Mid-Year Start) ---
+  const handleManualAdjust = () => {
+    if (!selectedEmp || !adjAmount) return;
+    
+    const bank = selectedEmp.leave_bank || { vacation_balance: 0, personal_balance: 0, history: [] };
+    const amount = parseFloat(adjAmount);
+    const finalAmount = adjType === 'Add' ? amount : -amount;
+
+    let newVac = bank.vacation_balance;
+    let newPers = bank.personal_balance;
+
+    if (finalAmount > 0) {
+        newVac += finalAmount; 
+    } else {
+        let remaining = Math.abs(finalAmount);
+        if (newPers >= remaining) {
+            newPers -= remaining;
+        } else {
+            remaining -= newPers;
+            newPers = 0;
+            newVac -= remaining;
+        }
+    }
+
+    const tx: LeaveTransaction = {
+        id: `ADJ-${Date.now()}`,
+        date: new Date().toISOString().split('T')[0],
+        type: 'adjustment',
+        amount_vacation: finalAmount > 0 ? finalAmount : (newVac - bank.vacation_balance),
+        amount_personal: finalAmount > 0 ? 0 : (newPers - bank.personal_balance),
+        description: `Manual: ${adjNote}`,
+        balance_after: newVac + newPers
+    };
+
+    const updatedEmp = {
+        ...selectedEmp,
+        leave_bank: {
+            vacation_balance: newVac,
+            personal_balance: newPers,
+            history: [tx, ...bank.history]
+        }
+    };
+
+    setEmployees(employees.map(e => e.id === selectedEmp.id ? updatedEmp : e));
+    setShowAdjustModal(false);
+    setAdjAmount('');
+    setAdjNote('');
+    notify('success', 'Balance adjusted.');
   };
 
   return (
     <div className="h-full flex flex-col bg-gray-50">
-      
-      {/* Header */}
       <div className="bg-white border-b border-gray-200 p-6 flex justify-between items-center shadow-sm">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">Leave Management</h2>
@@ -78,111 +120,122 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
       </div>
 
       <div className="flex-1 overflow-hidden flex">
-        
-        {/* Staff List */}
-        <div className="w-1/2 overflow-y-auto p-6 border-r border-gray-200">
-           <div className="space-y-4">
-             {ftStaff.map(emp => {
+        {/* Left: Staff List */}
+        <div className="w-1/3 overflow-y-auto p-4 border-r border-gray-200 bg-white">
+           {ftStaff.map(emp => {
                const bank = emp.leave_bank || { vacation_balance: 0, personal_balance: 0 };
                const total = bank.vacation_balance + bank.personal_balance;
-               const shift = emp.classifications.shift_schedule || '12-Hour';
-               
                return (
-                 <div key={emp.id} onClick={() => setSelectedEmpId(emp.id)} className={`bg-white p-4 rounded-xl border cursor-pointer transition-all hover:shadow-md ${selectedEmpId === emp.id ? 'border-blue-500 ring-2 ring-blue-100' : 'border-gray-200'}`}>
-                    <div className="flex justify-between items-start mb-3">
+                 <div key={emp.id} onClick={() => setSelectedEmpId(emp.id)} className={`p-4 mb-3 rounded-xl border cursor-pointer hover:shadow-md transition-all ${selectedEmpId === emp.id ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white'}`}>
+                    <div className="flex justify-between items-center">
                        <div>
                          <h3 className="font-bold text-gray-900">{emp.personal.full_name}</h3>
-                         <div className="text-xs text-gray-500 mt-0.5 flex gap-2">
-                            <span>{shift}</span>
-                            <span>•</span>
-                            <span>Start: {emp.classifications.ft_start_date || 'N/A'}</span>
-                         </div>
+                         <span className="text-xs text-gray-500">{emp.classifications.shift_schedule || '12-Hour'} Shift</span>
                        </div>
                        <div className="text-right">
-                          <span className="block text-2xl font-bold text-blue-600">{total.toFixed(2)}</span>
+                          <span className="block text-xl font-bold text-blue-600">{total.toFixed(2)}</span>
                           <span className="text-[10px] uppercase font-bold text-gray-400">Total Hours</span>
-                       </div>
-                    </div>
-                    
-                    <div className="grid grid-cols-2 gap-2 text-xs">
-                       <div className="bg-gray-50 p-2 rounded border border-gray-100">
-                          <span className="block text-gray-400 font-bold uppercase text-[9px]">Vacation</span>
-                          <span className="font-mono font-medium">{bank.vacation_balance.toFixed(2)}</span>
-                       </div>
-                       <div className="bg-gray-50 p-2 rounded border border-gray-100">
-                          <span className="block text-gray-400 font-bold uppercase text-[9px]">Personal</span>
-                          <span className="font-mono font-medium">{bank.personal_balance.toFixed(2)}</span>
                        </div>
                     </div>
                  </div>
                );
-             })}
-           </div>
+           })}
         </div>
 
-        {/* Detailed View / Audit Log */}
-        <div className="w-1/2 bg-white flex flex-col">
+        {/* Right: The Auditor Page */}
+        <div className="w-2/3 bg-gray-50 flex flex-col">
            {selectedEmp ? (
-             <>
-               <div className="p-6 border-b border-gray-100 bg-gray-50/50">
-                  <div className="flex justify-between items-center">
-                     <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2">
-                        <History size={18} className="text-blue-500"/> Audit Log: {selectedEmp.personal.last_name}
-                     </h3>
-                     <button onClick={() => handleRunAudit(selectedEmp)} className="text-xs font-bold text-amber-600 bg-amber-50 px-3 py-1.5 rounded border border-amber-200 hover:bg-amber-100 transition-colors">
-                        Run Cap Audit
-                     </button>
+             <div className="flex-1 flex flex-col">
+               <div className="p-6 border-b border-gray-200 bg-white flex justify-between items-center">
+                  <div>
+                     <h3 className="text-lg font-bold text-gray-900">Audit Log: {selectedEmp.personal.full_name}</h3>
+                     <p className="text-xs text-gray-500">Official record of Accruals and Usage</p>
+                  </div>
+                  <div className="flex gap-2">
+                     <button onClick={() => {
+                         const updated = checkAnniversaryCap(selectedEmp);
+                         setEmployees(employees.map(e => e.id === selectedEmp.id ? updated : e));
+                         notify('success', 'Cap check complete');
+                     }} className="btn-secondary text-xs">Run Annual Cap Check</button>
+                     <button onClick={() => setShowAdjustModal(true)} className="btn-primary bg-slate-800 text-white text-xs">Adjust Balance</button>
                   </div>
                </div>
-               <div className="flex-1 overflow-y-auto p-0">
-                  <table className="w-full text-left text-sm">
-                     <thead className="bg-gray-50 text-xs text-gray-500 uppercase font-bold sticky top-0">
-                        <tr>
-                           <th className="p-4 border-b">Date</th>
-                           <th className="p-4 border-b">Action</th>
-                           <th className="p-4 border-b text-right">Amount</th>
-                           <th className="p-4 border-b text-right">Balance</th>
-                        </tr>
-                     </thead>
-                     <tbody className="divide-y divide-gray-100">
-                        {(selectedEmp.leave_bank?.history || []).map((tx: any) => (
-                           <tr key={tx.id} className="hover:bg-gray-50">
-                              <td className="p-4 text-gray-600">{tx.date}</td>
-                              <td className="p-4">
-                                 <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase mb-1 ${tx.type === 'accrual' ? 'bg-green-100 text-green-700' : tx.type === 'usage' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
-                                    {tx.type}
-                                 </span>
-                                 <div className="text-xs text-gray-900">{tx.description}</div>
-                              </td>
-                              <td className="p-4 text-right font-mono">
-                                 <div className={tx.amount_vacation > 0 ? 'text-green-600' : 'text-gray-400'}>
-                                    {tx.amount_vacation > 0 ? '+' : ''}{tx.amount_vacation.toFixed(2)} V
-                                 </div>
-                                 <div className={tx.amount_personal > 0 ? 'text-green-600' : 'text-gray-400'}>
-                                    {tx.amount_personal > 0 ? '+' : ''}{tx.amount_personal.toFixed(2)} P
-                                 </div>
-                              </td>
-                              <td className="p-4 text-right font-bold text-gray-900 font-mono">
-                                 {tx.balance_after.toFixed(2)}
-                              </td>
-                           </tr>
-                        ))}
-                        {(!selectedEmp.leave_bank?.history || selectedEmp.leave_bank.history.length === 0) && (
-                           <tr><td colSpan={4} className="p-8 text-center text-gray-400">No history available.</td></tr>
-                        )}
-                     </tbody>
-                  </table>
+
+               <div className="flex-1 overflow-y-auto p-6">
+                  <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+                      <table className="w-full text-left text-sm">
+                         <thead className="bg-gray-100 text-xs uppercase font-bold text-gray-500">
+                            <tr>
+                               <th className="p-4 border-b">Date</th>
+                               <th className="p-4 border-b">Type</th>
+                               <th className="p-4 border-b">Description</th>
+                               <th className="p-4 border-b text-right">Change</th>
+                               <th className="p-4 border-b text-right bg-gray-50">Running Bal</th>
+                            </tr>
+                         </thead>
+                         <tbody className="divide-y divide-gray-100">
+                            {(selectedEmp.leave_bank?.history || []).map((tx: any) => {
+                               const change = tx.amount_vacation + tx.amount_personal;
+                               return (
+                                   <tr key={tx.id} className="hover:bg-gray-50">
+                                      <td className="p-4 text-gray-600 whitespace-nowrap">{tx.date}</td>
+                                      <td className="p-4"><span className="px-2 py-1 rounded text-[10px] font-bold bg-gray-100 text-gray-600 uppercase">{tx.type}</span></td>
+                                      <td className="p-4 text-gray-900 font-medium">{tx.description}</td>
+                                      <td className={`p-4 text-right font-mono font-bold ${change > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                         {change > 0 ? '+' : ''}{change.toFixed(2)}
+                                      </td>
+                                      <td className="p-4 text-right font-mono font-bold text-gray-900 bg-gray-50 border-l border-gray-100">
+                                         {tx.balance_after.toFixed(2)}
+                                      </td>
+                                   </tr>
+                               );
+                            })}
+                         </tbody>
+                      </table>
+                  </div>
                </div>
-             </>
+             </div>
            ) : (
-             <div className="flex-1 flex items-center justify-center text-gray-300 flex-col gap-2">
-                <Calendar size={48} />
-                <span className="font-medium">Select an employee to view details</span>
+             <div className="flex-1 flex items-center justify-center text-gray-400 flex-col">
+                <ShieldCheck size={48} className="mb-4 opacity-20"/>
+                <p>Select an employee to view their official leave ledger</p>
              </div>
            )}
         </div>
-
       </div>
+
+      {/* Manual Adjustment Modal */}
+      {showAdjustModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+           <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md">
+              <h3 className="text-lg font-bold mb-4">Manual Balance Adjustment</h3>
+              
+              <div className="space-y-4">
+                 <div>
+                    <label className="label">Action</label>
+                    <div className="flex gap-2">
+                       <button onClick={() => setAdjType('Add')} className={`flex-1 py-2 rounded border font-bold ${adjType === 'Add' ? 'bg-green-50 border-green-500 text-green-700' : 'border-gray-200'}`}>Add (+)</button>
+                       <button onClick={() => setAdjType('Subtract')} className={`flex-1 py-2 rounded border font-bold ${adjType === 'Subtract' ? 'bg-red-50 border-red-500 text-red-700' : 'border-gray-200'}`}>Subtract (-)</button>
+                    </div>
+                 </div>
+                 <div>
+                    <label className="label">Hours</label>
+                    <input type="number" className="input-std" value={adjAmount} onChange={e => setAdjAmount(e.target.value)} placeholder="0.00" autoFocus />
+                 </div>
+                 <div>
+                    <label className="label">Reason / Audit Note</label>
+                    <input className="input-std" value={adjNote} onChange={e => setAdjNote(e.target.value)} placeholder="e.g. Initial Setup, Correction" />
+                 </div>
+              </div>
+
+              <div className="flex justify-end gap-2 mt-6">
+                 <button onClick={() => setShowAdjustModal(false)} className="btn-secondary">Cancel</button>
+                 <button onClick={handleManualAdjust} className="btn-primary bg-blue-600 text-white">Save Adjustment</button>
+              </div>
+           </div>
+        </div>
+      )}
+      <style>{`.label { display: block; font-size: 0.75rem; font-weight: 700; color: #4b5563; text-transform: uppercase; margin-bottom: 0.25rem; } .input-std { width: 100%; border: 1px solid #d1d5db; border-radius: 0.5rem; padding: 0.5rem; outline: none; }`}</style>
     </div>
   );
 }

@@ -1,3 +1,4 @@
+import { MasterRates, Employee, AppConfig } from '../types';
 import { INITIAL_RATES, INITIAL_EMPLOYEES, INITIAL_CONFIG } from '../constants';
 
 // --- CONFIGURATION ---
@@ -15,6 +16,7 @@ declare global {
   interface Window {
     gapi: any;
     google: any;
+    tokenClient: any; // Added explicit typing
   }
 }
 
@@ -51,6 +53,7 @@ export function initGis(onTokenCallback: (response: any) => void) {
       scope: SCOPES,
       callback: onTokenCallback,
     });
+    window.tokenClient = tokenClient;
     resolve();
   });
 }
@@ -66,6 +69,21 @@ export interface SystemIds {
   rootId: string;
   configId: string;
   currentYearId: string;
+  rates?: string;     // Added for saveSystemData
+  employees?: string; // Added for saveSystemData
+  config?: string;    // Added for saveSystemData
+}
+
+export interface SystemData {
+  rates: MasterRates | null;
+  employees: Employee[] | null;
+  config: AppConfig | null;
+}
+
+export interface DriveFile {
+  id: string;
+  name: string;
+  createdTime?: string;
 }
 
 export async function initializeSystem(): Promise<{ ids: SystemIds, data: any }> {
@@ -91,9 +109,21 @@ export async function initializeSystem(): Promise<{ ids: SystemIds, data: any }>
   let yearFolderId = await findFile(yearFolderName, 'application/vnd.google-apps.folder', rootId);
   if (!yearFolderId) yearFolderId = await createFolder(yearFolderName, rootId);
 
-  const ids = { rootId, configId, currentYearId: yearFolderId };
+  // 3. Load Config Files (and capture their IDs)
+  // We need to return the IDs so saveSystemData knows which specific files to update
+  const ratesId = await findFile('master_rates.json', 'application/json', configId) || '';
+  const empsId = await findFile('personnel_master_db.json', 'application/json', configId) || '';
+  const confId = await findFile('app_config.json', 'application/json', configId) || '';
 
-  // 3. Load Config Files
+  const ids: SystemIds = { 
+      rootId, 
+      configId, 
+      currentYearId: yearFolderId,
+      rates: ratesId,
+      employees: empsId,
+      config: confId
+  };
+
   const [rates, employees, config] = await Promise.all([
     ensureFile('master_rates.json', ids.configId, INITIAL_RATES),
     ensureFile('personnel_master_db.json', ids.configId, { employees: INITIAL_EMPLOYEES }),
@@ -244,13 +274,18 @@ export async function saveJsonFile(filename: string, content: any, parentId: str
   });
 }
 
-// Keeping this for compatibility if needed, but not used in new flow
-export async function listAllPayrollRuns(_rootId: string): Promise<DriveFile[]> {
-  return []; 
-}
+// *** ADDED THIS FUNCTION TO FIX YOUR ERROR ***
+// This function saves all 3 system files (Rates, Employees, Config) in one go
+export async function saveSystemData(
+  ids: SystemIds, 
+  data: { rates: MasterRates, employees: Employee[], config: AppConfig }
+): Promise<void> {
+  // We use the configId from your smart loader as the parent folder
+  const parentId = ids.configId;
 
-export interface DriveFile {
-  id: string;
-  name: string;
-  createdTime?: string;
+  await Promise.all([
+    saveJsonFile('master_rates.json', data.rates, parentId),
+    saveJsonFile('personnel_master_db.json', { employees: data.employees }, parentId), // Note: wrapping employees in object matches loader structure
+    saveJsonFile('app_config.json', data.config, parentId)
+  ]);
 }

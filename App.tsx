@@ -2,17 +2,21 @@ import { useState, useEffect } from 'react';
 import Welcome from './components/Welcome';
 import Layout from './components/Layout';
 import PayrollPage from './components/PayrollPage';
+import LeaveManager from './components/LeaveManager';
 import Settings from './components/Settings';
 import Reports from './components/Reports';
-import { FeedbackProvider } from './components/FeedbackProvider';
+import { FeedbackProvider, useFeedback } from './components/FeedbackProvider';
 import { 
   initGapi, initGis, requestAccessToken, 
-  initializeSystem, SystemIds 
+  initializeSystem, saveSystemData, SystemIds 
 } from './services/driveService';
+import { processLeaveUsage } from './services/leaveService';
 import { MasterRates, Employee, PayrollRow, AppConfig } from './types';
 import { INITIAL_RATES, INITIAL_EMPLOYEES, INITIAL_CONFIG } from './constants';
 
-export default function App() {
+function AppContent() {
+  const { notify } = useFeedback();
+  
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [gapiReady, setGapiReady] = useState(false);
   const [authStatus, setAuthStatus] = useState("Initializing...");
@@ -20,7 +24,6 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('payroll');
   const [systemIds, setSystemIds] = useState<SystemIds | null>(null);
 
-  // --- NEW: Track individual file loading status ---
   const [systemStatus, setSystemStatus] = useState({
     rates: false,
     employees: false,
@@ -61,11 +64,9 @@ export default function App() {
   const loadSystem = async () => {
     try {
       setAuthStatus("Loading System Data...");
-      
       const result = await initializeSystem();
       setSystemIds(result.ids);
       
-      // Update data and track status individually
       if (result.data.rates) {
         setRates(result.data.rates);
         setSystemStatus(prev => ({ ...prev, rates: true }));
@@ -92,48 +93,107 @@ export default function App() {
     window.location.reload(); 
   };
 
+  // --- ACTIONS ---
+
+  const handleSaveToDrive = async () => {
+    if (!systemIds) {
+      notify('error', 'System not initialized (Missing IDs)');
+      return;
+    }
+    try {
+      notify('info', 'Saving to Drive...');
+      await saveSystemData(systemIds, { rates, employees, config });
+      notify('success', 'System saved successfully.');
+    } catch (error) {
+      console.error(error);
+      notify('error', 'Failed to save system data.');
+    }
+  };
+
+  const handlePostLeave = () => {
+    const ptoRows = payrollData.filter(r => r.code === 'Paid Time Off' && r.hours > 0);
+
+    if (ptoRows.length === 0) {
+      notify('info', 'No Paid Time Off rows found to post.');
+      return;
+    }
+
+    let updatedEmployees = [...employees];
+    let processedCount = 0;
+
+    ptoRows.forEach(row => {
+      const empIndex = updatedEmployees.findIndex(e => {
+          return e.personal.full_name === row.name; 
+      });
+
+      if (empIndex !== -1) {
+         const emp = updatedEmployees[empIndex];
+         if (emp.classifications.employment_type === 'Full Time') {
+            updatedEmployees[empIndex] = processLeaveUsage(
+               emp, 
+               row.hours, 
+               row.startDate || new Date().toISOString().split('T')[0],
+               'Payroll Run Deduction'
+            );
+            processedCount++;
+         }
+      }
+    });
+
+    setEmployees(updatedEmployees);
+    notify('success', `Posted leave deductions for ${processedCount} employees.`);
+  };
+
   if (!isAuthenticated) {
-    return (
-      <FeedbackProvider>
-        <Welcome onLogin={handleLogin} status={authStatus} isReady={gapiReady} />
-      </FeedbackProvider>
-    );
+    return <Welcome onLogin={handleLogin} status={authStatus} isReady={gapiReady} />;
   }
 
   return (
+    <Layout 
+      activeTab={activeTab} 
+      onTabChange={setActiveTab} 
+      userEmail="Admin User" 
+      onLogout={handleLogout}
+      systemStatus={systemStatus}
+      authStatus={authStatus}
+    >
+      {activeTab === 'payroll' && (
+        <PayrollPage 
+          data={payrollData} 
+          setData={setPayrollData} 
+          employees={employees} 
+          rates={rates} 
+          onSave={handleSaveToDrive} 
+          onPostLeave={handlePostLeave}
+          systemIds={systemIds}
+        />
+      )}
+      
+      {activeTab === 'leave' && (
+        <LeaveManager employees={employees} setEmployees={setEmployees} />
+      )}
+      
+      {activeTab === 'reports' && <Reports />}
+      
+      {activeTab === 'settings' && (
+        <Settings 
+           rates={rates} 
+           setRates={setRates} 
+           employees={employees} 
+           setEmployees={setEmployees}
+           config={config}
+           setConfig={setConfig}
+           systemIds={systemIds}
+        />
+      )}
+    </Layout>
+  );
+}
+
+export default function App() {
+  return (
     <FeedbackProvider>
-      <Layout 
-        activeTab={activeTab} 
-        onTabChange={setActiveTab} 
-        userEmail="Admin User" 
-        onLogout={handleLogout}
-        systemStatus={systemStatus}
-        authStatus={authStatus}
-      >
-        {activeTab === 'payroll' && (
-          <PayrollPage 
-            data={payrollData} 
-            setData={setPayrollData} 
-            employees={employees} 
-            rates={rates} 
-            systemIds={systemIds}
-          />
-        )}
-        
-        {activeTab === 'reports' && <Reports />}
-        
-        {activeTab === 'settings' && (
-          <Settings 
-             rates={rates} 
-             setRates={setRates} 
-             employees={employees} 
-             setEmployees={setEmployees}
-             config={config}
-             setConfig={setConfig}
-             systemIds={systemIds}
-          />
-        )}
-      </Layout>
+      <AppContent />
     </FeedbackProvider>
   );
 }

@@ -4,8 +4,8 @@ import { calculatePayRow, getRowColor } from '../services/payrollService';
 import { 
   Edit2, Printer, RefreshCw, FileUp, 
   AlertTriangle, UploadCloud, ChevronRight, 
-  Filter, Clock, DollarSign, Hash, ArrowUpDown, ArrowUp, ArrowDown,
-  Search, ListFilter
+  Clock, DollarSign, Hash, ArrowUpDown, ArrowUp, ArrowDown,
+  Search, ListFilter, BookOpenCheck 
 } from 'lucide-react';
 import RowModal from './RowModal';
 import PrintWizard from './PrintWizard';
@@ -16,6 +16,7 @@ interface EditorProps {
   setData: (data: PayrollRow[]) => void;
   employees: Employee[];
   rates: MasterRates;
+  onPostLeave: () => void;
   onSave: () => void;
 }
 
@@ -25,7 +26,12 @@ type EmploymentFilter = 'all' | 'Full Time' | 'PRN';
 type SortKey = keyof PayrollRow | 'flags';
 type SortDirection = 'asc' | 'desc';
 
-export default function Editor({ data, setData, employees, rates, onSave }: EditorProps) {
+export default function Editor({ data, setData, employees, rates, onSave, onPostLeave }: EditorProps) {
+  // ... rest of the code is correct, the key was adding onPostLeave above ...
+  // [No other changes needed here unless you want the full file reprinted]
+  
+  // Just ensuring the button part is here:
+  // ...
   const [editingRow, setEditingRow] = useState<PayrollRow | null>(null);
   const [showPrintWizard, setShowPrintWizard] = useState(false);
   const { notify, confirm } = useFeedback();
@@ -36,7 +42,6 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
   const pageSize = 100;
 
   // --- FILTER STATES ---
-  // Fix: Explicitly applying the types here removes the "unused type" warning
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState<EmploymentFilter>("all"); 
   const [filterLevel, setFilterLevel] = useState("all");
@@ -44,7 +49,6 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
   const [filterFlags, setFilterFlags] = useState<FilterMode>("all");
 
   // --- SORT STATES ---
-  // Fix: Changed <string> to <SortKey> so the type is used
   const [sortKey, setSortKey] = useState<SortKey>('name');
   const [sortDir, setSortDir] = useState<SortDirection>('asc');
 
@@ -269,6 +273,9 @@ export default function Editor({ data, setData, employees, rates, onSave }: Edit
            <div className="flex bg-gray-100 p-1 rounded-lg shrink-0">
               <button onClick={() => setViewMode('summary')} className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${viewMode === 'summary' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'}`}>Summary</button>
               <button onClick={() => setViewMode('detail')} className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${viewMode === 'detail' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500'}`}>Detail</button>
+              <button onClick={onPostLeave} className="btn-icon text-amber-600 hover:bg-amber-50" title="Post Leave to Bank">
+                <BookOpenCheck size={18} />
+              </button>
            </div>
 
            <div className="relative flex-1 w-full md:max-w-md">

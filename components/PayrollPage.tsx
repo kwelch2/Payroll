@@ -17,13 +17,15 @@ interface PayrollPageProps {
   employees: Employee[];
   rates: MasterRates;
   systemIds: SystemIds | null;
+  onSave: () => void;       
+  onPostLeave: () => void;  
 }
 
-export default function PayrollPage({ data, setData, employees, rates, systemIds }: PayrollPageProps) {
+export default function PayrollPage({ data, setData, employees, rates, systemIds, onSave, onPostLeave }: PayrollPageProps) {
   const [showLoadModal, setShowLoadModal] = useState(false);
   
   // Browsing State
-  const [browserMode, setBrowserMode] = useState<'load' | 'save'>('load'); // New State
+  const [browserMode, setBrowserMode] = useState<'load' | 'save'>('load'); 
   const [viewMode, setViewMode] = useState<'years' | 'files'>('years');
   const [yearFolder, setYearFolder] = useState<DriveFile | null>(null);
   const [browserList, setBrowserList] = useState<DriveFile[]>([]);
@@ -109,7 +111,6 @@ export default function PayrollPage({ data, setData, employees, rates, systemIds
 
   const handleLoadFile = async (file: DriveFile) => {
     if (browserMode === 'save') {
-        // In save mode, clicking a file populates the name to overwrite
         setSaveFilename(file.name.replace('.json', ''));
         return;
     }
@@ -147,7 +148,6 @@ export default function PayrollPage({ data, setData, employees, rates, systemIds
       let finalName = saveFilename.trim();
       if (!finalName.toLowerCase().endsWith('.json')) finalName += '.json';
 
-      // Check overwrite
       const existing = browserList.find(f => f.name === finalName);
       if (existing) {
           const overwrite = await confirm({
@@ -161,10 +161,8 @@ export default function PayrollPage({ data, setData, employees, rates, systemIds
 
       setIsSaving(true);
       try {
-          // Calculate stats locally for metadata
           const stats = data.reduce((acc, row) => {
             let total = row.total || 0;
-            // Recalculate effective total for manual overrides (duplicated logic for safety)
             if (row.manual_rate_override !== undefined && row.manual_rate_override !== null) {
                 const def = rates.pay_codes.definitions.find(d => d.label === row.code);
                 const isFlat = def?.type === 'flat';
@@ -223,7 +221,6 @@ export default function PayrollPage({ data, setData, employees, rates, systemIds
       const lines = text.split('\n').filter(line => line.trim().length > 0);
       const newRows: PayrollRow[] = [];
       
-      // 1. Detect Header Row
       let headerIndex = -1;
       let headerRow: string[] = [];
 
@@ -244,7 +241,6 @@ export default function PayrollPage({ data, setData, employees, rates, systemIds
         return;
       }
 
-      // 2. Map Columns Dynamically
       const findCol = (patterns: string[]) => headerRow.findIndex(h => patterns.some(p => h.toLowerCase().includes(p.toLowerCase())));
 
       const idxLast = findCol(["Last Name", "LastName", "Employee Name"]);
@@ -257,7 +253,6 @@ export default function PayrollPage({ data, setData, employees, rates, systemIds
       const idxEndDate = findCol(["End Date"]);
       const idxEndTime = findCol(["End Time"]);
 
-      // 3. Process Rows
       for (let i = headerIndex + 1; i < lines.length; i++) {
         const cols = lines[i].split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(c => c.replace(/^"|"$/g, '').trim());
         
@@ -282,13 +277,13 @@ export default function PayrollPage({ data, setData, employees, rates, systemIds
         const endTime = idxEndTime > -1 ? cols[idxEndTime] : "";
 
         if (payCode && (!isNaN(hours) || payCode)) {
-           const fullName = `${lastName}, ${firstName}`;
-           const row = calculatePayRow(fullName, payCode, hours || 0, employees, rates);
-           row.startDate = startDate;
-           row.startTime = startTime;
-           row.endDate = endDate;
-           row.endTime = endTime;
-           newRows.push(row);
+            const fullName = `${lastName}, ${firstName}`;
+            const row = calculatePayRow(fullName, payCode, hours || 0, employees, rates);
+            row.startDate = startDate;
+            row.startTime = startTime;
+            row.endDate = endDate;
+            row.endTime = endTime;
+            newRows.push(row);
         }
       }
       
@@ -353,8 +348,8 @@ export default function PayrollPage({ data, setData, employees, rates, systemIds
           setData={setData} 
           employees={employees} 
           rates={rates} 
-          systemIds={systemIds} 
-          onSave={() => openBrowser('save')} 
+          onSave={onSave} 
+          onPostLeave={onPostLeave}
         />
       )}
 

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Search, UserPlus, Edit2, Trash2, X, User, DollarSign, Calendar, MapPin, Briefcase } from 'lucide-react';
 import { Employee, MasterRates, AppConfig } from '../types';
 import { useFeedback } from './FeedbackProvider';
