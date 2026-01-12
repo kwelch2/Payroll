@@ -1,5 +1,5 @@
 import { ReactNode } from 'react';
-import { LogOut, FileText, Users, Settings as SettingsIcon } from 'lucide-react';
+import { LogOut, FileText, Users, Settings as SettingsIcon, CalendarClock } from 'lucide-react'; // <--- Added CalendarClock
 
 interface LayoutProps {
   children: ReactNode;
@@ -60,7 +60,7 @@ export default function Layout({ children, activeTab, onTabChange, userEmail, on
           
           {/* Logo Area */}
           <div className="flex items-center gap-3 w-64">
-             {/* UPDATED: Dynamically uses the Base URL from vite.config */}
+             {/* Uses the Base URL from vite.config dynamically */}
              <img 
                 src={`${import.meta.env.BASE_URL}logo.jpg`} 
                 alt="Gem Payroll" 
@@ -78,6 +78,8 @@ export default function Layout({ children, activeTab, onTabChange, userEmail, on
           {/* Navigation */}
           <nav className="hidden md:flex items-center h-full">
             <NavItem id="payroll" label="Payroll Editor" icon={FileText} />
+            {/* THIS WAS MISSING: */}
+            <NavItem id="leave" label="Leave Management" icon={CalendarClock} />
             <NavItem id="reports" label="Reports" icon={Users} />
             <NavItem id="settings" label="Settings" icon={SettingsIcon} />
           </nav>
@@ -85,7 +87,6 @@ export default function Layout({ children, activeTab, onTabChange, userEmail, on
           {/* User & Status Area */}
           <div className="flex items-center gap-6 w-64 justify-end">
             
-            {/* The 3 Checkmarks */}
             <div className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-full border border-gray-200">
                <StatusDot label="Pay Rates" active={systemStatus.rates} />
                <StatusDot label="Personnel DB" active={systemStatus.employees} />
