@@ -182,22 +182,6 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
 
   const getCodeColor = (code: string) => rates.pay_codes.definitions.find(d => d.label === code)?.color || '#e2e8f0';
 
-  // --- KEYBOARD & FOCUS ---
-  useEffect(() => {
-    const modal = modalRef.current;
-    if (!modal) return;
-    modal.focus();
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { event.preventDefault(); onClose(); }
-    };
-    modal.addEventListener('keydown', handleKeyDown);
-    return () => modal.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
-
-  useEffect(() => { setRenderAll(false); }, [search, selectedStatus, selectedLevels, selectedCodes, sortField, sortAsc]);
-
-  // --- SUB-COMPONENTS ---
-
   const MultiSelectFilter = ({ title, options, selectedSet, setFunction, isOpen, toggleOpen }: any) => {
     const toggleItem = (val: string) => {
       const newSet = new Set(selectedSet);
@@ -224,6 +208,20 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
       </div>
     );
   };
+
+  // --- KEYBOARD & FOCUS ---
+  useEffect(() => {
+    const modal = modalRef.current;
+    if (!modal) return;
+    modal.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); onClose(); }
+    };
+    modal.addEventListener('keydown', handleKeyDown);
+    return () => modal.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
+  useEffect(() => { setRenderAll(false); }, [search, selectedStatus, selectedLevels, selectedCodes, sortField, sortAsc]);
 
   const SummaryView = () => (
     <div className="space-y-6 print-container">
@@ -297,7 +295,7 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
       <div className="text-center border-b-2 border-black pb-2 mb-4">
         <h3 className="font-bold text-xl uppercase tracking-widest">Detailed Audit Log</h3>
         <p className="text-xs text-gray-500">Line-by-line breakdown • Sorted by {sortField}</p>
-        {finalPrintData.length > previewLimit && !renderAll && (
+        {processedData.length > previewLimit && !renderAll && (
           <div className="mt-2 text-[10px] text-amber-600 font-medium">
             Showing first {previewLimit} rows for performance. Use “Render All” before printing.
           </div>
@@ -369,26 +367,30 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
   );
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-      <div ref={modalRef} tabIndex={-1} className="bg-white w-full max-w-7xl h-[95vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-gray-700 ring-1 ring-white/10">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200 modal-overlay">
+      <div
+        ref={modalRef}
+        tabIndex={-1}
+        className="bg-white w-full max-w-7xl h-[95vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden border border-gray-700 ring-1 ring-white/10 modal-container"
+      >
         
-        {/* HEADER */}
+        {/* HEADER - No Print */}
         <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-slate-900 text-white no-print shrink-0">
            <div className="flex items-center gap-3">
              <div className="bg-blue-600 p-2 rounded-lg shadow-lg shadow-blue-900/50"><Printer size={20} className="text-white" /></div>
              <div>
-               <h2 className="text-lg font-bold tracking-tight">Print & Finalize</h2>
+               <h2 id="print-wizard-title" className="text-lg font-bold">Print & Finalize</h2>
                <p className="text-xs text-slate-400">Review, filter, and select data for final report</p>
              </div>
            </div>
            <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors text-slate-300 hover:text-white"><X size={24}/></button>
         </div>
 
-        <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
+        <div className="flex-1 flex flex-col md:flex-row overflow-hidden scroll-wrapper">
            
-           {/* SIDEBAR CONTROLS */}
+           {/* SIDEBAR CONTROLS - No Print */}
            <div className="w-full md:w-80 bg-slate-50 border-r border-gray-200 flex flex-col gap-5 p-5 no-print overflow-y-auto shrink-0">
-              
+              {/* ... Sidebar Controls ... */}
               <div className="space-y-2">
                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1"><LayoutList size={10}/> Report Layout</label>
                  <div className="grid grid-cols-2 gap-1 bg-white p-1 rounded-lg border border-gray-200 shadow-sm">
@@ -473,7 +475,7 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
            </div>
 
            {/* PREVIEW AREA */}
-           <div className="flex-1 bg-white overflow-y-auto p-8 relative">
+           <div className="flex-1 bg-white overflow-y-auto p-8 relative scroll-area">
               <div id="print-area" className="max-w-[1100px] mx-auto min-h-[1000px] bg-white print:p-0 print:w-full">
                  
                  {/* Print Header */}
@@ -508,7 +510,7 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
                     {layout === 'detail' && <DetailView />}
                  </div>
 
-                 {/* Signatures Area - NOW AT BOTTOM */}
+                 {/* Signatures Area */}
                  <div className="mt-12 mb-8 grid grid-cols-2 gap-12 bg-slate-50 p-4 rounded-lg border border-slate-100 print:bg-white print:border-none print:p-0 page-break-avoid">
                     <div>
                        <div className="h-8 border-b border-slate-400 mb-1"></div>
@@ -538,23 +540,57 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
       <style>{`
         @media print {
           @page { margin: 15mm 10mm 15mm 10mm; }
-          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          body { visibility: hidden; }
           
           /* Hide Sidebar and Modal UI */
           .no-print, button, .lucide { display: none !important; }
           
-          /* Reset Layout for Print */
-          .fixed { position: static !important; inset: auto !important; height: auto !important; width: auto !important; overflow: visible !important; }
-          .flex-1 { flex: none !important; height: auto !important; overflow: visible !important; }
-          .bg-black\\/60 { background: white !important; }
+          /* RESET MODAL CONTAINERS */
+          .modal-overlay {
+             position: static !important;
+             background: white !important;
+             display: block !important;
+             padding: 0 !important;
+             margin: 0 !important;
+             visibility: visible !important;
+          }
+          .modal-container {
+             width: 100% !important;
+             max-width: none !important;
+             height: auto !important;
+             border: none !important;
+             box-shadow: none !important;
+             overflow: visible !important;
+             border-radius: 0 !important;
+             visibility: visible !important;
+          }
+          .scroll-wrapper {
+             overflow: visible !important;
+             display: block !important;
+             height: auto !important;
+             visibility: visible !important;
+          }
+          .scroll-area {
+             overflow: visible !important;
+             height: auto !important;
+             padding: 0 !important;
+             visibility: visible !important;
+          }
           
           /* Target the Print Area specifically */
           #print-area {
-             position: relative;
-             width: 100%;
-             margin: 0;
-             padding: 0;
-             display: block;
+             visibility: visible !important;
+             position: relative !important;
+             left: 0 !important;
+             top: 0 !important;
+             width: 100% !important;
+             margin: 0 !important;
+             padding: 0 !important;
+             display: block !important;
+          }
+
+          #print-area * {
+             visibility: visible !important;
           }
 
           /* Ensure Page Breaks behave */
