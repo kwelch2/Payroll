@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Employee, LeaveTransaction } from '../types';
 import { calculateMonthlyAccrual, checkAnniversaryCap } from '../services/leaveService';
-import { PlayCircle, ShieldCheck, Briefcase, Calendar, TrendingUp } from 'lucide-react';
+import { PlayCircle, ShieldCheck, Briefcase, Calendar, TrendingUp, LayoutGrid, List } from 'lucide-react';
 import { useFeedback } from './FeedbackProvider';
 
 interface LeaveManagerProps {
@@ -13,6 +13,7 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
   const { notify, confirm } = useFeedback();
   const [selectedEmpId, setSelectedEmpId] = useState<string | null>(null);
   const [showAdjustModal, setShowAdjustModal] = useState(false);
+  const [viewMode, setViewMode] = useState<'list' | 'master'>('list');
   
   // Adjustment Form State
   const [adjType, setAdjType] = useState<'Add' | 'Subtract'>('Add');
@@ -22,16 +23,35 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
   const ftStaff = employees.filter(e => e.classifications.employment_type === 'Full Time');
   const selectedEmp = employees.find(e => e.id === selectedEmpId);
 
-  // --- 1. RUN MONTHLY ACCRUALS ---
+  // --- 1. RUN MONTHLY ACCRUALS (With Duplicate Check) ---
   const handleRunMonthly = async () => {
-    if (!await confirm({ title: 'Run Monthly Accruals?', message: 'This will add Vacation & Personal hours to all active Full Time staff based on tenure. Proceed?', confirmLabel: 'Run Accruals' })) return;
+    // Check how many have already run this month
+    const currentMonth = new Date().toISOString().slice(0, 7); // "2024-03"
+    const alreadyRunCount = ftStaff.filter(e => e.leave_bank?.last_accrual_date?.startsWith(currentMonth)).length;
+    
+    let message = 'This will add Vacation & Personal hours to all active Full Time staff.';
+    if (alreadyRunCount > 0) {
+        message = `WARNING: ${alreadyRunCount} employees have ALREADY received accruals this month. \n\nThey will be SKIPPED to prevent duplicates. Continue for remaining staff?`;
+    }
+
+    if (!await confirm({ title: 'Run Monthly Accruals?', message, confirmLabel: 'Run Accruals' })) return;
+
+    let processedCount = 0;
+    let skippedCount = 0;
 
     const updatedStaff = employees.map(emp => {
+      // Logic Checks
       if (emp.classifications.employment_type !== 'Full Time' || emp.classifications.pto_status === 'Frozen') return emp;
+
+      // Duplicate Check
+      if (emp.leave_bank?.last_accrual_date?.startsWith(currentMonth)) {
+          skippedCount++;
+          return emp;
+      }
 
       const { vacation, personal, tier } = calculateMonthlyAccrual(emp);
       
-      // Init bank safely to avoid NaN
+      // Init bank safely
       const currentVac = emp.leave_bank?.vacation_balance || 0;
       const currentPers = emp.leave_bank?.personal_balance || 0;
       const history = emp.leave_bank?.history || [];
@@ -53,11 +73,13 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
           ...history
         ]
       };
+      
+      processedCount++;
       return { ...emp, leave_bank: newBank };
     });
 
     setEmployees(updatedStaff);
-    notify('success', `Accruals processed for ${ftStaff.length} employees.`);
+    notify('success', `Accruals: ${processedCount} Processed, ${skippedCount} Skipped (Already Done).`);
   };
 
   // --- 2. MANUAL ADJUSTMENT ---
@@ -118,28 +140,39 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
 
   return (
     <div className="h-full flex flex-col bg-gray-50">
+      
+      {/* Header */}
       <div className="bg-white border-b border-gray-200 p-6 flex justify-between items-center shadow-sm">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">Leave Management</h2>
           <p className="text-sm text-gray-500">Track Vacation & Personal leave for Full-Time staff</p>
         </div>
-        <button onClick={handleRunMonthly} className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-2.5 rounded-lg hover:bg-emerald-700 shadow-md transition-all font-bold">
-           <PlayCircle size={18} /> Run Monthly Accruals
-        </button>
+        <div className="flex gap-3">
+            <div className="bg-gray-100 p-1 rounded-lg flex text-sm font-medium">
+                <button onClick={() => setViewMode('list')} className={`px-3 py-1.5 rounded-md flex items-center gap-2 ${viewMode === 'list' ? 'bg-white shadow text-gray-900' : 'text-gray-500'}`}>
+                    <List size={16}/> Split View
+                </button>
+                <button onClick={() => setViewMode('master')} className={`px-3 py-1.5 rounded-md flex items-center gap-2 ${viewMode === 'master' ? 'bg-white shadow text-gray-900' : 'text-gray-500'}`}>
+                    <LayoutGrid size={16}/> Master Sheet
+                </button>
+            </div>
+            <button onClick={handleRunMonthly} className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-2.5 rounded-lg hover:bg-emerald-700 shadow-md transition-all font-bold">
+               <PlayCircle size={18} /> Run Monthly Accruals
+            </button>
+        </div>
       </div>
 
+      {/* VIEW: SPLIT LIST */}
+      {viewMode === 'list' && (
       <div className="flex-1 overflow-hidden flex">
         {/* Left: Staff List */}
         <div className="w-5/12 overflow-y-auto p-4 border-r border-gray-200 bg-white">
            <div className="space-y-3">
              {ftStaff.map(emp => {
-                 // Safe Math for Display
                  const vac = emp.leave_bank?.vacation_balance || 0;
                  const pers = emp.leave_bank?.personal_balance || 0;
                  const total = vac + pers;
-                 const shift = emp.classifications.shift_schedule || '12-Hour';
-                 
-                 // Calc Stats
+                 const shift = emp.classifications.shift_schedule || '10-Hour'; // Default if missing
                  const stats = calculateMonthlyAccrual(emp);
 
                  return (
@@ -148,10 +181,10 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
                          <div>
                            <h3 className="font-bold text-gray-900 text-lg">{emp.personal.full_name}</h3>
                            <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
-                              <span className="bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">{shift} Shift</span>
+                              <span className="bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">{shift}</span>
                               <span>•</span>
-                              <span className={stats.yearsOfService > 0 ? 'text-green-600 font-bold' : 'text-gray-400'}>
-                                {stats.yearsOfService} Years Svc
+                              <span className={stats.yearsOfService > 0 ? 'text-green-600 font-bold' : 'text-amber-600 font-bold'}>
+                                {stats.yearsOfService.toFixed(1)} Years Svc
                               </span>
                            </div>
                          </div>
@@ -161,7 +194,6 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
                          </div>
                       </div>
 
-                      {/* STATS BAR - ADDED THIS */}
                       <div className="grid grid-cols-3 gap-2 pt-3 border-t border-gray-100">
                           <div className="text-center">
                              <div className="text-[10px] text-gray-400 font-bold uppercase flex items-center justify-center gap-1"><Briefcase size={10}/> Yearly Allow</div>
@@ -173,7 +205,7 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
                           </div>
                           <div className="text-center border-l border-gray-100">
                              <div className="text-[10px] text-gray-400 font-bold uppercase flex items-center justify-center gap-1"><Calendar size={10}/> Start Date</div>
-                             <div className="font-medium text-gray-600 text-xs">{emp.classifications.ft_start_date || 'N/A'}</div>
+                             <div className="font-medium text-gray-600 text-xs">{emp.classifications.ft_start_date || 'Missing'}</div>
                           </div>
                       </div>
                    </div>
@@ -247,6 +279,49 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
            )}
         </div>
       </div>
+      )}
+
+      {/* VIEW: MASTER SHEET (NEW) */}
+      {viewMode === 'master' && (
+        <div className="flex-1 overflow-auto p-6">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <table className="w-full text-left border-collapse">
+                    <thead className="bg-slate-900 text-white text-xs uppercase font-bold sticky top-0 z-10">
+                        <tr>
+                            <th className="p-4">Employee</th>
+                            <th className="p-4">Shift Type</th>
+                            <th className="p-4">FT Start Date</th>
+                            <th className="p-4 text-center">Yrs Service</th>
+                            <th className="p-4 text-right">Mthly Accrual</th>
+                            <th className="p-4 text-right">Yearly Total</th>
+                            <th className="p-4 text-right bg-slate-800">Current Balance</th>
+                            <th className="p-4">Last Run</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 text-sm">
+                        {ftStaff.map(emp => {
+                            const stats = calculateMonthlyAccrual(emp);
+                            const vac = emp.leave_bank?.vacation_balance || 0;
+                            const pers = emp.leave_bank?.personal_balance || 0;
+                            const total = vac + pers;
+                            return (
+                                <tr key={emp.id} className="hover:bg-blue-50 transition-colors cursor-pointer" onClick={() => { setSelectedEmpId(emp.id); setViewMode('list'); }}>
+                                    <td className="p-4 font-bold text-gray-900">{emp.personal.full_name}</td>
+                                    <td className="p-4 text-gray-600">{emp.classifications.shift_schedule || 'Unknown'}</td>
+                                    <td className="p-4 text-gray-600 font-mono">{emp.classifications.ft_start_date || '---'}</td>
+                                    <td className="p-4 text-center font-bold text-blue-600">{stats.yearsOfService.toFixed(1)}</td>
+                                    <td className="p-4 text-right text-green-700 font-mono">+{stats.totalMonthly.toFixed(2)}</td>
+                                    <td className="p-4 text-right text-gray-500 font-mono">{stats.yearlyAllowance.toFixed(0)}</td>
+                                    <td className="p-4 text-right font-bold text-slate-900 bg-slate-50 border-l border-slate-200 text-lg">{total.toFixed(2)}</td>
+                                    <td className="p-4 text-xs text-gray-400">{emp.leave_bank?.last_accrual_date || 'Never'}</td>
+                                </tr>
+                            )
+                        })}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+      )}
 
       {/* Manual Adjustment Modal */}
       {showAdjustModal && (

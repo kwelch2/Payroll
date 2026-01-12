@@ -6,10 +6,10 @@ import { Employee, LeaveTransaction } from '../types';
  */
 export function calculateMonthlyAccrual(employee: Employee) {
   const startDate = employee.classifications.ft_start_date;
-  const shiftType = employee.classifications.shift_schedule;
+  const shiftType = employee.classifications.shift_schedule || "";
 
   // Defaults for missing data
-  if (!startDate || !shiftType || employee.classifications.employment_type !== 'Full Time') {
+  if (!startDate || employee.classifications.employment_type !== 'Full Time') {
     return { 
       vacation: 0, 
       personal: 0, 
@@ -33,11 +33,13 @@ export function calculateMonthlyAccrual(employee: Employee) {
   if (m < 0 || (m === 0 && now.getDate() < start.getDate())) {
     years--;
   }
-  // Prevent negative years if start date is in future
+  // Prevent negative years
   years = Math.max(0, years);
 
   // 2. Determine Day Value (Hours)
-  const hoursPerDay = shiftType === '12-Hour' ? 12 : 10;
+  // FIX: Loose check for "12" to handle "12-Hour" or "12 Hour Shift"
+  const is12Hour = shiftType.includes('12');
+  const hoursPerDay = is12Hour ? 12 : 10;
 
   // 3. Determine Vacation Days Per Year (The Policy)
   let vacationDays = 0;
@@ -69,7 +71,7 @@ export function calculateMonthlyAccrual(employee: Employee) {
  * Automatically deducts from Personal Leave first, then Vacation.
  */
 export function processLeaveUsage(employee: Employee, hoursUsed: number, date: string, note: string): Employee {
-  // Initialize bank if missing, ensuring numbers are 0 not undefined
+  // Initialize bank if missing
   const bank = {
     vacation_balance: employee.leave_bank?.vacation_balance || 0,
     personal_balance: employee.leave_bank?.personal_balance || 0,
@@ -119,20 +121,17 @@ export function processLeaveUsage(employee: Employee, hoursUsed: number, date: s
   };
 }
 
-/**
- * Checks for Anniversary Cap on Personal Leave.
- */
 export function checkAnniversaryCap(employee: Employee): Employee {
   const bank = employee.leave_bank;
-  const shiftType = employee.classifications.shift_schedule;
+  const shiftType = employee.classifications.shift_schedule || "";
   
-  if (!bank || !shiftType) return employee;
+  if (!bank) return employee;
 
   // Ensure values exist
   bank.personal_balance = bank.personal_balance || 0;
   bank.vacation_balance = bank.vacation_balance || 0;
 
-  const cap = shiftType === '12-Hour' ? 60 : 50;
+  const cap = shiftType.includes('12') ? 60 : 50;
   
   if (bank.personal_balance > cap) {
     const forfeitAmount = bank.personal_balance - cap;
