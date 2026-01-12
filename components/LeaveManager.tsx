@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Employee, LeaveTransaction } from '../types';
 import { calculateMonthlyAccrual, checkAnniversaryCap, formatShiftLabel } from '../services/leaveService';
-import { PlayCircle, ShieldCheck, Briefcase, Calendar, TrendingUp, LayoutGrid, List } from 'lucide-react';
+import { PlayCircle, ShieldCheck, Briefcase, Calendar, TrendingUp, LayoutGrid, List, Trash2 } from 'lucide-react';
 import { useFeedback } from './FeedbackProvider';
 
 interface LeaveManagerProps {
@@ -138,6 +138,45 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
     notify('success', 'Balance adjusted.');
   };
 
+  // --- 3. DELETE TRANSACTION ---
+  const handleDeleteTransaction = async (txId: string) => {
+    if (!selectedEmp || !selectedEmp.leave_bank) return;
+
+    const txIndex = selectedEmp.leave_bank.history.findIndex(t => t.id === txId);
+    if (txIndex === -1) return;
+    const tx = selectedEmp.leave_bank.history[txIndex];
+
+    const approved = await confirm({
+      title: 'Delete Entry?',
+      message: 'This will remove the record and revert the balance change. Are you sure?',
+      confirmLabel: 'Delete Record',
+      cancelLabel: 'Cancel'
+    });
+    
+    if (!approved) return;
+
+    // Calculate new balances by reversing the transaction
+    const newVac = selectedEmp.leave_bank.vacation_balance - tx.amount_vacation;
+    const newPers = selectedEmp.leave_bank.personal_balance - tx.amount_personal;
+    
+    // Remove from history
+    const newHistory = [...selectedEmp.leave_bank.history];
+    newHistory.splice(txIndex, 1);
+
+    const updatedEmp: Employee = {
+      ...selectedEmp,
+      leave_bank: {
+        ...selectedEmp.leave_bank,
+        vacation_balance: newVac,
+        personal_balance: newPers,
+        history: newHistory
+      }
+    };
+
+    setEmployees(employees.map(e => e.id === selectedEmp.id ? updatedEmp : e));
+    notify('success', 'Entry deleted and balance reverted.');
+  };
+
   return (
     <div className="h-full flex flex-col bg-gray-50">
       
@@ -244,13 +283,14 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
                                <th className="p-4 border-b">Description</th>
                                <th className="p-4 border-b text-right">Change</th>
                                <th className="p-4 border-b text-right bg-gray-50">Running Bal</th>
+                               <th className="p-4 border-b w-8 bg-gray-50"></th>
                             </tr>
                          </thead>
                          <tbody className="divide-y divide-gray-100">
                             {(selectedEmp.leave_bank?.history || []).map((tx: any) => {
                                const change = tx.amount_vacation + tx.amount_personal;
                                return (
-                                   <tr key={tx.id} className="hover:bg-gray-50 transition-colors">
+                                   <tr key={tx.id} className="hover:bg-gray-50 transition-colors group">
                                       <td className="p-4 text-gray-600 whitespace-nowrap">{tx.date}</td>
                                       <td className="p-4"><span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${tx.type === 'accrual' ? 'bg-green-100 text-green-700' : tx.type === 'usage' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'}`}>{tx.type}</span></td>
                                       <td className="p-4 text-gray-900 font-medium">{tx.description}</td>
@@ -260,11 +300,20 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
                                       <td className="p-4 text-right font-mono font-bold text-gray-900 bg-gray-50 border-l border-gray-100">
                                          {tx.balance_after.toFixed(2)}
                                       </td>
+                                      <td className="p-2 text-center bg-gray-50">
+                                          <button 
+                                            onClick={(e) => { e.stopPropagation(); handleDeleteTransaction(tx.id); }}
+                                            className="text-gray-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 p-1"
+                                            title="Delete Entry"
+                                          >
+                                            <Trash2 size={14} />
+                                          </button>
+                                      </td>
                                    </tr>
                                );
                             })}
                             {(!selectedEmp.leave_bank?.history || selectedEmp.leave_bank.history.length === 0) && (
-                                <tr><td colSpan={5} className="p-12 text-center text-gray-400">No transaction history found.</td></tr>
+                                <tr><td colSpan={6} className="p-12 text-center text-gray-400">No transaction history found.</td></tr>
                             )}
                          </tbody>
                       </table>
