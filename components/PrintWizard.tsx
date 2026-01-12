@@ -160,7 +160,7 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
             label: row.code, 
             hours: 0, 
             total: 0,
-            count: 0, // Added Count Tracker
+            count: 0, 
             color: def?.color || '#e2e8f0',
             isFlat: def?.type === 'flat'
         });
@@ -177,10 +177,26 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
   // --- UI HELPERS ---
   const handlePrint = () => {
     setRenderAll(true);
-    setTimeout(() => window.print(), 300);
+    setTimeout(() => window.print(), 500);
   };
 
   const getCodeColor = (code: string) => rates.pay_codes.definitions.find(d => d.label === code)?.color || '#e2e8f0';
+
+  // --- KEYBOARD & FOCUS ---
+  useEffect(() => {
+    const modal = modalRef.current;
+    if (!modal) return;
+    modal.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); onClose(); }
+    };
+    modal.addEventListener('keydown', handleKeyDown);
+    return () => modal.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
+  useEffect(() => { setRenderAll(false); }, [search, selectedStatus, selectedLevels, selectedCodes, sortField, sortAsc]);
+
+  // --- SUB-COMPONENTS ---
 
   const MultiSelectFilter = ({ title, options, selectedSet, setFunction, isOpen, toggleOpen }: any) => {
     const toggleItem = (val: string) => {
@@ -209,22 +225,8 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
     );
   };
 
-  // --- KEYBOARD & FOCUS ---
-  useEffect(() => {
-    const modal = modalRef.current;
-    if (!modal) return;
-    modal.focus();
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { event.preventDefault(); onClose(); }
-    };
-    modal.addEventListener('keydown', handleKeyDown);
-    return () => modal.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
-
-  useEffect(() => { setRenderAll(false); }, [search, selectedStatus, selectedLevels, selectedCodes, sortField, sortAsc]);
-
   const SummaryView = () => (
-    <div className="space-y-6">
+    <div className="space-y-6 print-container">
       <div className="text-center border-b-2 border-black pb-2 mb-4">
         <h3 className="font-bold text-xl uppercase tracking-widest">Payroll Summary Report</h3>
         <p className="text-xs text-gray-500">Grouped by Employee • {finalPrintData.length} records found</p>
@@ -232,7 +234,7 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
 
       <div className="space-y-6">
         {summaryGroups.map((emp) => (
-          <div key={emp.name} className="break-inside-avoid border-2 border-slate-800 rounded-lg overflow-hidden shadow-sm">
+          <div key={emp.name} className="break-inside-avoid border-2 border-slate-800 rounded-lg overflow-hidden shadow-sm page-break-avoid">
             <div className="bg-gray-100 p-3 flex justify-between items-center border-b-2 border-slate-300">
                <div>
                  <span className="font-bold text-gray-900 text-sm">{emp.name}</span>
@@ -254,17 +256,17 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
                         {code.label}
                      </td>
                      
-                     {/* UPDATED: Qty/Hrs Display Logic */}
+                     {/* UPDATED: Side-by-side Layout for Qty/Hrs */}
                      <td className="py-2 text-right w-1/4 text-gray-700 font-mono">
                         {code.isFlat ? (
-                            <div className="flex flex-col items-end leading-none">
+                            <div className="flex items-baseline justify-end gap-2">
                                 <span className="font-bold text-sm">{code.count} Qty</span>
-                                <span className="text-[9px] text-gray-400 mt-0.5">{code.hours.toFixed(2)} hrs</span>
+                                <span className="text-[10px] text-gray-400">({code.hours.toFixed(2)}h)</span>
                             </div>
                         ) : (
-                            <div className="flex flex-col items-end leading-none">
+                            <div className="flex items-baseline justify-end gap-2">
                                 <span className="font-bold text-sm">{code.hours.toFixed(2)} Hrs</span>
-                                <span className="text-[9px] text-gray-400 mt-0.5">{code.count} shift{code.count !== 1 ? 's' : ''}</span>
+                                <span className="text-[10px] text-gray-400">({code.count}s)</span>
                             </div>
                         )}
                      </td>
@@ -283,7 +285,7 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
         ))}
       </div>
 
-      <div className="mt-8 border-t-2 border-black pt-4 flex justify-between items-center text-sm font-bold">
+      <div className="mt-8 border-t-2 border-black pt-4 flex justify-between items-center text-sm font-bold page-break-avoid">
          <span>Grand Total (All Employees)</span>
          <span className="text-xl">${summaryGroups.reduce((acc, e) => acc + e.grandTotal, 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
       </div>
@@ -295,7 +297,7 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
       <div className="text-center border-b-2 border-black pb-2 mb-4">
         <h3 className="font-bold text-xl uppercase tracking-widest">Detailed Audit Log</h3>
         <p className="text-xs text-gray-500">Line-by-line breakdown • Sorted by {sortField}</p>
-        {processedData.length > previewLimit && !renderAll && (
+        {finalPrintData.length > previewLimit && !renderAll && (
           <div className="mt-2 text-[10px] text-amber-600 font-medium">
             Showing first {previewLimit} rows for performance. Use “Render All” before printing.
           </div>
@@ -333,17 +335,17 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
                  <td className="py-1.5 px-2 font-medium text-gray-700">{row.code}</td>
                  <td className="py-1.5 px-2 text-gray-500">{row.startDate || '-'}</td>
                  
-                 {/* UPDATED: Qty/Hrs Display Logic for Detail View */}
+                 {/* UPDATED: Side-by-side Logic for Detail View */}
                  <td className="py-1.5 px-2 text-right font-mono text-gray-600">
                     {isFlat ? (
-                        <div className="flex flex-col items-end leading-none">
+                        <div className="flex items-baseline justify-end gap-1">
                             <span className="font-bold">1.00</span>
-                            <span className="text-[8px] text-gray-400 mt-0.5">{row.hours.toFixed(2)} hrs</span>
+                            <span className="text-[8px] text-gray-400">({row.hours.toFixed(2)}h)</span>
                         </div>
                     ) : (
-                        <div className="flex flex-col items-end leading-none">
+                        <div className="flex items-baseline justify-end gap-1">
                             <span className="font-bold">{row.hours.toFixed(2)}</span>
-                            <span className="text-[8px] text-gray-400 mt-0.5">1 shift</span>
+                            <span className="text-[8px] text-gray-400">(1s)</span>
                         </div>
                     )}
                  </td>
@@ -500,8 +502,14 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
                     </div>
                  </div>
 
-                 {/* Signatures Area */}
-                 <div className="mb-8 grid grid-cols-2 gap-12 bg-slate-50 p-4 rounded-lg border border-slate-100 print:bg-white print:border-none print:p-0">
+                 {/* Content */}
+                 <div className="print-content">
+                    {layout === 'summary' && <SummaryView />}
+                    {layout === 'detail' && <DetailView />}
+                 </div>
+
+                 {/* Signatures Area - NOW AT BOTTOM */}
+                 <div className="mt-12 mb-8 grid grid-cols-2 gap-12 bg-slate-50 p-4 rounded-lg border border-slate-100 print:bg-white print:border-none print:p-0 page-break-avoid">
                     <div>
                        <div className="h-8 border-b border-slate-400 mb-1"></div>
                        <div className="flex justify-between text-[10px] uppercase font-bold text-slate-400">
@@ -518,20 +526,51 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
                     </div>
                  </div>
 
-                 {/* Content */}
-                 <div className="print-content">
-                    {layout === 'summary' && <SummaryView />}
-                    {layout === 'detail' && <DetailView />}
-                 </div>
-
                  {/* Print Footer */}
-                 <div className="mt-8 pt-8 border-t border-gray-100 text-center text-[10px] text-gray-400">
+                 <div className="mt-8 pt-8 border-t border-gray-100 text-center text-[10px] text-gray-400 fixed-footer">
                     Generated by Gem Payroll System • Confidential Personnel Record
                  </div>
               </div>
            </div>
         </div>
       </div>
+
+      <style>{`
+        @media print {
+          @page { margin: 15mm 10mm 15mm 10mm; }
+          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          
+          /* Hide Sidebar and Modal UI */
+          .no-print, button, .lucide { display: none !important; }
+          
+          /* Reset Layout for Print */
+          .fixed { position: static !important; inset: auto !important; height: auto !important; width: auto !important; overflow: visible !important; }
+          .flex-1 { flex: none !important; height: auto !important; overflow: visible !important; }
+          .bg-black\\/60 { background: white !important; }
+          
+          /* Target the Print Area specifically */
+          #print-area {
+             position: relative;
+             width: 100%;
+             margin: 0;
+             padding: 0;
+             display: block;
+          }
+
+          /* Ensure Page Breaks behave */
+          .break-inside-avoid { break-inside: avoid; page-break-inside: avoid; }
+          .page-break-avoid { page-break-inside: avoid; }
+          
+          /* Footer Placement */
+          .fixed-footer {
+             position: fixed;
+             bottom: 0;
+             left: 0;
+             width: 100%;
+             background: white;
+          }
+        }
+      `}</style>
     </div>
   );
 }
