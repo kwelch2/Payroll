@@ -3,20 +3,13 @@ import { Employee, LeaveTransaction } from '../types';
 /**
  * Calculates the monthly accrual amounts based on Years of Service and Shift Type.
  */
-export function calculateMonthlyAccrual(employee: Employee) {
+export function calculateMonthlyAccrual(employee: Employee): { vacation: number, personal: number, totalMonthly: number, tier: string, yearsOfService: number, yearlyAllowance: number } {
   const startDate = employee.classifications.ft_start_date;
-  const shiftType = employee.classifications.shift_schedule || "10-Hour Shift"; // Default to 10 if missing
+  const shiftType = employee.classifications.shift_schedule || "";
 
-  // Defaults for missing data
+  // Safety Checks
   if (!startDate || employee.classifications.employment_type !== 'Full Time') {
-    return { 
-      vacation: 0, 
-      personal: 0, 
-      totalMonthly: 0,
-      tier: 'N/A', 
-      yearsOfService: 0,
-      yearlyAllowance: 0
-    };
+    return { vacation: 0, personal: 0, totalMonthly: 0, tier: 'N/A', yearsOfService: 0, yearlyAllowance: 0 };
   }
 
   // 1. Calculate Years of Service
@@ -34,11 +27,11 @@ export function calculateMonthlyAccrual(employee: Employee) {
   years = Math.max(0, years);
 
   // 2. Determine Day Value (Hours)
-  // Logic: Check if it contains "12" anywhere in the string to be safe, or exact match
-  const is12Hour = shiftType.includes('12');
+  // FIX: Loose check for "12" or "48" covers "12-Hour", "12-Hour Shift", "48/96"
+  const is12Hour = shiftType.includes('12') || shiftType.includes('48');
   const hoursPerDay = is12Hour ? 12 : 10;
 
-  // 3. Determine Vacation Days Per Year
+  // 3. Determine Vacation Days Per Year (The Policy)
   let vacationDays = 0;
   let tierName = "";
 
@@ -63,12 +56,11 @@ export function calculateMonthlyAccrual(employee: Employee) {
   };
 }
 
+/**
+ * Processes a "Paid Time Off" usage entry.
+ */
 export function processLeaveUsage(employee: Employee, hoursUsed: number, date: string, note: string): Employee {
-  const bank = {
-    vacation_balance: employee.leave_bank?.vacation_balance || 0,
-    personal_balance: employee.leave_bank?.personal_balance || 0,
-    history: employee.leave_bank?.history || []
-  };
+  const bank = employee.leave_bank || { vacation_balance: 0, personal_balance: 0, history: [] };
   
   let remaining = hoursUsed;
   let usedPersonal = 0;
@@ -88,7 +80,7 @@ export function processLeaveUsage(employee: Employee, hoursUsed: number, date: s
 
   if (remaining > 0) {
     usedVacation = remaining;
-    bank.vacation_balance -= remaining;
+    bank.vacation_balance -= remaining; 
   }
 
   const transaction: LeaveTransaction = {
@@ -116,10 +108,12 @@ export function checkAnniversaryCap(employee: Employee): Employee {
   
   if (!bank) return employee;
 
+  // Ensure banks are initialized
   bank.personal_balance = bank.personal_balance || 0;
   bank.vacation_balance = bank.vacation_balance || 0;
 
-  const cap = shiftType.includes('12') ? 60 : 50;
+  // Use the same robust check for Cap
+  const cap = (shiftType.includes('12') || shiftType.includes('48')) ? 60 : 50;
   
   if (bank.personal_balance > cap) {
     const forfeitAmount = bank.personal_balance - cap;
