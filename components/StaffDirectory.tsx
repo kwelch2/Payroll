@@ -25,7 +25,7 @@ export default function StaffDirectory({ employees, setEmployees, rates, config 
         pay_level: Object.keys(rates.pay_levels)[0] || "Hourly Only", 
         rank: config.ranks[0] || "Firefighter",
         employment_type: "PRN", 
-        shift_schedule: '12', // Updated Default
+        shift_schedule: '12', 
         fire_status: config.fire_statuses[0] || "Active",
         ems_cert: "",
         start_date_fire: "",
@@ -90,6 +90,14 @@ export default function StaffDirectory({ employees, setEmployees, rates, config 
             custom_rates: newRates
         }
     });
+  };
+
+  // *** FIXED: Helper to interpret old data like "10-Hour Shift" as just "10" ***
+  const getShiftValue = (raw: string | undefined) => {
+    if (!raw) return '12'; // Default
+    if (raw.includes('10')) return '10';
+    if (raw.includes('12')) return '12';
+    return '12';
   };
 
   return (
@@ -327,8 +335,12 @@ export default function StaffDirectory({ employees, setEmployees, rates, config 
                       </div>
                       <div>
                         <label className="label text-amber-900">Shift Schedule</label>
-                        {/* UPDATED: Values now simplfied to "12" and "10" */}
-                        <select className="input-std border-amber-300 focus:ring-amber-500 bg-white" value={fullEditEmp.classifications.shift_schedule || '12'} onChange={e => updateClass('shift_schedule', e.target.value)}>
+                        <select 
+                            className="input-std border-amber-300 focus:ring-amber-500 bg-white" 
+                            /* Fix: Reads old data ("12-Hour") as "12", so dropdown works */
+                            value={getShiftValue(fullEditEmp.classifications.shift_schedule)} 
+                            onChange={e => updateClass('shift_schedule', e.target.value)}
+                        >
                            <option value="12">12-Hour Shift (48hr Week)</option>
                            <option value="10">10-Hour Shift (40hr Week)</option>
                         </select>
