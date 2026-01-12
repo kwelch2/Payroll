@@ -172,10 +172,19 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
     return Array.from(groups.values());
   }, [finalPrintData, rates, empStatusMap]);
 
-  const handlePrint = () => {
-    setRenderAll(true);
-    setTimeout(() => window.print(), 500);
-  };
+const handlePrint = () => {
+  setRenderAll(true);
+};
+useEffect(() => {
+  if (!renderAll) return;
+
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      window.print();
+    });
+  });
+}, [renderAll]);
+
 
   const getCodeColor = (code: string) => rates.pay_codes.definitions.find(d => d.label === code)?.color || '#e2e8f0';
 
@@ -550,7 +559,24 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
 
           /* HIDE APP UI */
           .no-print, button, .lucide, nav, header { display: none !important; }
-          body > *:not(.modal-overlay) { display: none !important; }
+         @media print {
+  body {
+    visibility: hidden;
+  }
+
+  #print-area,
+  #print-area * {
+    visibility: visible;
+  }
+
+  #print-area {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+  }
+}
+
 
           /* RESET MODAL CONTAINERS TO ALLOW FLOW */
           .modal-overlay {
