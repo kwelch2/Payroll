@@ -60,8 +60,12 @@ export default function Layout({ children, activeTab, onTabChange, userEmail, on
           
           {/* Logo Area */}
           <div className="flex items-center gap-3 w-64">
-             {/* UPDATED: Uses logo.jpg from public folder */}
-             <img src="/logo.jpg" alt="Gem Payroll" className="w-10 h-10 object-contain" />
+             {/* UPDATED: Dynamically uses the Base URL from vite.config */}
+             <img 
+                src={`${import.meta.env.BASE_URL}logo.jpg`} 
+                alt="Gem Payroll" 
+                className="w-10 h-10 object-contain" 
+             />
              <div className="leading-tight">
                <h1 className="font-bold text-gray-900 tracking-tight">Gem Payroll</h1>
                <div className="flex items-center gap-1.5">

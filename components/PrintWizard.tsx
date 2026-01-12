@@ -225,7 +225,6 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
 
       <div className="space-y-6">
         {summaryGroups.map((emp) => (
-          // CHANGED: Thicker border here (border-2 border-slate-800)
           <div key={emp.name} className="break-inside-avoid border-2 border-slate-800 rounded-lg overflow-hidden shadow-sm">
             <div className="bg-gray-100 p-3 flex justify-between items-center border-b-2 border-slate-300">
                <div>
@@ -242,7 +241,6 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
             <table className="w-full text-xs">
                <tbody>
                  {Array.from(emp.codes.values()).map((code) => (
-                   // CHANGED: Added border-b border-gray-300 to separate pay codes clearly
                    <tr key={code.label} className="border-b border-gray-300 last:border-0" style={{ backgroundColor: `${code.color}10` }}>
                      <td className="pl-4 py-2 w-1/2 flex items-center gap-2 font-medium text-gray-700">
                         <div className="w-2 h-2 rounded-full border border-gray-400" style={{ backgroundColor: code.color }}></div>
@@ -448,8 +446,12 @@ export default function PrintWizard({ data, onClose, rates, employees }: PrintWi
                  {/* Print Header */}
                  <div className="flex justify-between items-start border-b-4 border-slate-900 pb-4 mb-6">
                     <div className="flex items-center gap-4">
-                       {/* UPDATED: Uses logo.jpg from public folder */}
-                       <img src="/logo.jpg" alt="Gem Payroll" className="w-16 h-16 object-contain" />
+                       {/* UPDATED: Dynamically uses Base URL for logo */}
+                       <img 
+                          src={`${import.meta.env.BASE_URL}logo.jpg`} 
+                          alt="Gem Payroll" 
+                          className="w-16 h-16 object-contain" 
+                       />
                        <div>
                           <h1 className="text-2xl font-black uppercase tracking-tight text-slate-900">Gem County Payroll</h1>
                           <div className="flex gap-4 text-xs font-medium text-slate-500 mt-1">
