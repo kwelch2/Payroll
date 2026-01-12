@@ -2,29 +2,12 @@ import { Employee, LeaveTransaction } from '../types';
 
 /**
  * Calculates the monthly accrual amounts based on Years of Service and Shift Type.
- * Returns detailed info for UI display.
  */
-function getHoursPerDay(shiftSchedule?: string): number {
-  if (!shiftSchedule) return 10;
-
-  const normalized = shiftSchedule.toLowerCase();
-
-  if (
-    normalized.includes('12') ||
-    normalized.includes('48') ||
-    normalized.includes('24')
-  ) {
-    return 12;
-  }
-
-  return 10;
-}
-
 export function calculateMonthlyAccrual(employee: Employee) {
   const startDate = employee.classifications.ft_start_date;
-  const shiftType = employee.classifications.shift_schedule || "";
+  const shiftType = employee.classifications.shift_schedule || "10-Hour Shift"; // Default to 10 if missing
 
-  // Defaults for missing data or non-Full Time
+  // Defaults for missing data
   if (!startDate || employee.classifications.employment_type !== 'Full Time') {
     return { 
       vacation: 0, 
@@ -38,7 +21,6 @@ export function calculateMonthlyAccrual(employee: Employee) {
 
   // 1. Calculate Years of Service
   const start = new Date(startDate);
-  // Valid Date Check
   if (isNaN(start.getTime())) {
      return { vacation: 0, personal: 0, totalMonthly: 0, tier: 'Invalid Date', yearsOfService: 0, yearlyAllowance: 0 };
   }
@@ -49,14 +31,14 @@ export function calculateMonthlyAccrual(employee: Employee) {
   if (m < 0 || (m === 0 && now.getDate() < start.getDate())) {
     years--;
   }
-  // Prevent negative years
   years = Math.max(0, years);
 
   // 2. Determine Day Value (Hours)
-  // FIX: Loose check for "12" or "48" to handle variations like "12-Hour", "12 Hour Shift", "48/96"
-  const hoursPerDay = getHoursPerDay(employee.classifications.shift_schedule);
+  // Logic: Check if it contains "12" anywhere in the string to be safe, or exact match
+  const is12Hour = shiftType.includes('12');
+  const hoursPerDay = is12Hour ? 12 : 10;
 
-  // 3. Determine Vacation Days Per Year (The Policy)
+  // 3. Determine Vacation Days Per Year
   let vacationDays = 0;
   let tierName = "";
 
@@ -69,7 +51,6 @@ export function calculateMonthlyAccrual(employee: Employee) {
 
   // 4. Calculate Monthly Hours
   const vacationHours = (vacationDays * hoursPerDay) / 12;
-  // Personal Leave is fixed at 5 Days/Year
   const personalHours = (5 * hoursPerDay) / 12;
 
   return {
@@ -82,12 +63,7 @@ export function calculateMonthlyAccrual(employee: Employee) {
   };
 }
 
-/**
- * Processes a "Paid Time Off" usage entry.
- * Automatically deducts from Personal Leave first, then Vacation.
- */
 export function processLeaveUsage(employee: Employee, hoursUsed: number, date: string, note: string): Employee {
-  // Initialize bank if missing
   const bank = {
     vacation_balance: employee.leave_bank?.vacation_balance || 0,
     personal_balance: employee.leave_bank?.personal_balance || 0,
@@ -98,7 +74,6 @@ export function processLeaveUsage(employee: Employee, hoursUsed: number, date: s
   let usedPersonal = 0;
   let usedVacation = 0;
 
-  // 1. Burn Personal Leave First
   if (bank.personal_balance > 0) {
     if (bank.personal_balance >= remaining) {
       usedPersonal = remaining;
@@ -111,13 +86,11 @@ export function processLeaveUsage(employee: Employee, hoursUsed: number, date: s
     }
   }
 
-  // 2. Burn Vacation Leave Second
   if (remaining > 0) {
     usedVacation = remaining;
     bank.vacation_balance -= remaining;
   }
 
-  // 3. Log Transaction
   const transaction: LeaveTransaction = {
     id: `TX-${Date.now()}`,
     date,
@@ -137,21 +110,16 @@ export function processLeaveUsage(employee: Employee, hoursUsed: number, date: s
   };
 }
 
-/**
- * Checks for Anniversary Cap on Personal Leave.
- */
 export function checkAnniversaryCap(employee: Employee): Employee {
   const bank = employee.leave_bank;
   const shiftType = employee.classifications.shift_schedule || "";
   
   if (!bank) return employee;
 
-  // Ensure values exist
   bank.personal_balance = bank.personal_balance || 0;
   bank.vacation_balance = bank.vacation_balance || 0;
 
-  const hoursPerDay = getHoursPerDay(employee.classifications.shift_schedule);
-const cap = hoursPerDay === 12 ? 60 : 50;
+  const cap = shiftType.includes('12') ? 60 : 50;
   
   if (bank.personal_balance > cap) {
     const forfeitAmount = bank.personal_balance - cap;

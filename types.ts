@@ -31,7 +31,6 @@ export interface MasterRates {
   pto_rules?: Record<string, PTORule>;
 }
 
-// --- NEW LEAVE INTERFACES ---
 export interface LeaveTransaction {
   id: string;
   date: string;
@@ -39,7 +38,7 @@ export interface LeaveTransaction {
   amount_vacation: number;
   amount_personal: number;
   description: string;
-  balance_after: number; // Combined balance
+  balance_after: number;
 }
 
 export interface Employee {
@@ -67,9 +66,9 @@ export interface Employee {
     start_date_ems?: string;
     start_date_fire?: string;
     
-    // --- NEW FIELDS FOR LEAVE ---
-    ft_start_date?: string; // The "Golden Key" for anniversaries
-    shift_schedule?: '10-Hour' | '12-Hour'; // Determines value of a day & caps
+    // --- UPDATED: Specific Shift Strings ---
+    ft_start_date?: string;
+    shift_schedule?: '10-Hour Shift' | '12-Hour Shift'; 
     pto_status?: 'Active' | 'Frozen';
   };
   contact?: {
@@ -83,7 +82,6 @@ export interface Employee {
   };
   status: string;
   
-  // --- NEW LEAVE BANK ---
   leave_bank?: {
     vacation_balance: number;
     personal_balance: number;

@@ -24,8 +24,8 @@ export default function StaffDirectory({ employees, setEmployees, rates, config 
       classifications: { 
         pay_level: Object.keys(rates.pay_levels)[0] || "Hourly Only", 
         rank: config.ranks[0] || "Firefighter",
-        employment_type: "PRN", // Default PRN
-        shift_schedule: '12-Hour', // Default Shift
+        employment_type: "PRN", 
+        shift_schedule: '12-Hour Shift', // Updated Default
         fire_status: config.fire_statuses[0] || "Active",
         ems_cert: "",
         start_date_fire: "",
@@ -33,7 +33,7 @@ export default function StaffDirectory({ employees, setEmployees, rates, config 
       },
       status: "Active",
       payroll_config: { use_user_pay_scale: false, custom_rates: {} },
-      leave_bank: { vacation_balance: 0, personal_balance: 0, history: [] }, // Init Leave Bank
+      leave_bank: { vacation_balance: 0, personal_balance: 0, history: [] },
       address: { line1: "", line2: "", city: "", state: "", zip: "" },
       contact: { phone: "", email: "", carrier: "" }
     };
@@ -327,9 +327,13 @@ export default function StaffDirectory({ employees, setEmployees, rates, config 
                       </div>
                       <div>
                         <label className="label text-amber-900">Shift Schedule</label>
-                        <select className="input-std border-amber-300 focus:ring-amber-500 bg-white" value={fullEditEmp.classifications.shift_schedule || '12-Hour'} onChange={e => updateClass('shift_schedule', e.target.value)}>
-                           <option value="12-Hour">12-Hour Shift (48hr Week)</option>
-                           <option value="10-Hour">10-Hour Shift (40hr Week)</option>
+                        <select 
+                            className="input-std border-amber-300 focus:ring-amber-500 bg-white" 
+                            value={fullEditEmp.classifications.shift_schedule || '12-Hour Shift'} 
+                            onChange={e => updateClass('shift_schedule', e.target.value)}
+                        >
+                           <option value="12-Hour Shift">12-Hour Shift (48hr Week)</option>
+                           <option value="10-Hour Shift">10-Hour Shift (40hr Week)</option>
                         </select>
                         <p className="text-[10px] text-amber-700 mt-1">Sets Day Value & Personal Cap</p>
                       </div>
@@ -365,7 +369,6 @@ export default function StaffDirectory({ employees, setEmployees, rates, config 
                    </label>
                 </div>
 
-                {/* Standard Pay Level Select (Hidden if Override is active) */}
                 {!fullEditEmp.payroll_config?.use_user_pay_scale && (
                    <div className="max-w-md">
                      <label className="label">Matrix Pay Level</label>
@@ -382,7 +385,6 @@ export default function StaffDirectory({ employees, setEmployees, rates, config 
                    </div>
                 )}
 
-                {/* Custom Rates Grid (Visible ONLY if Override is active) */}
                 {fullEditEmp.payroll_config?.use_user_pay_scale && (
                    <div className="animate-in fade-in slide-in-from-top-2 duration-300">
                       <div className="p-4 bg-yellow-50 text-yellow-800 text-sm rounded-lg border border-yellow-200 mb-4 flex items-start gap-2">
@@ -425,24 +427,7 @@ export default function StaffDirectory({ employees, setEmployees, rates, config 
           </div>
         </div>
       )}
-
-      {/* Embedded Styles for proper visibility */}
-      <style>{`
-        .label { display: block; font-size: 0.75rem; font-weight: 700; color: #4b5563; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem; }
-        .input-std { 
-           width: 100%; 
-           border: 1px solid #d1d5db; 
-           background-color: white;
-           border-radius: 0.5rem; 
-           padding: 0.5rem 0.75rem; 
-           font-size: 0.875rem; 
-           color: #111827; 
-           outline: none; 
-           transition: all 0.2s;
-           box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-        }
-        .input-std:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2); }
-      `}</style>
+      <style>{`.label { display: block; font-size: 0.75rem; font-weight: 700; color: #4b5563; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.25rem; } .input-std { width: 100%; border: 1px solid #d1d5db; background-color: white; border-radius: 0.5rem; padding: 0.5rem 0.75rem; font-size: 0.875rem; color: #111827; outline: none; transition: all 0.2s; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); } .input-std:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2); }`}</style>
     </div>
   );
 }
