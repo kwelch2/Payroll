@@ -230,61 +230,75 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
       return rows;
   };
 
-  // Helper to get Reference Rates (Current vs Next Tier)
+  // Helper to get Reference Rates (Current vs Renewal/Next Year)
   const getReferenceRates = () => {
       if (!selectedEmp) return null;
       
-      // Current Stats
+      // Current Stats at the start of budget period
       const currentStats = calculateMonthlyAccrual(selectedEmp, policy, getLocalDate(budgetStartDate));
       const hoursPerDay = getShiftHours(selectedEmp);
       
-      // Find Next Tier
-      const currentTierStart = policy.tiers.find(t => t.years === Math.floor(currentStats.yearsOfService))?.years || 0;
-      const nextTier = [...policy.tiers].sort((a,b) => a.years - b.years).find(t => t.years > currentTierStart);
+      // -- CURRENT YEAR STATS --
+      // We look up the tier manually to ensure we have the raw days, 
+      // though currentStats has most of this, having the days separated is useful.
+      const currentYearsInt = Math.floor(currentStats.yearsOfService);
       
-      // Calculate Next Tier Date & Stats
-      let nextTierDateStr = "N/A";
-      let nextTierStats = null;
+      const currentTier = [...policy.tiers]
+          .sort((a,b) => b.years - a.years)
+          .find(t => currentYearsInt >= t.years) || policy.tiers[0];
 
-      if (nextTier && selectedEmp.classifications.ft_start_date) {
-         // Fix: Use getLocalDate so we start with the correct day (e.g. Aug 1st not Jul 31st)
+      const curVacDays = currentTier.vacation_days;
+      const curPersDays = currentTier.personal_days;
+
+      // -- NEXT YEAR (RENEWAL) STATS --
+      // Calculate based on the upcoming year of service (Current + 1)
+      const nextYearInt = currentYearsInt + 1;
+      
+      // Find Tier applicable for Next Year
+      // (Find largest year threshold <= nextYearInt)
+      const nextYearTier = [...policy.tiers]
+          .sort((a,b) => b.years - a.years)
+          .find(t => nextYearInt >= t.years) || policy.tiers[0];
+
+      // Calculate Next Anniversary Date
+      let nextYearDateStr = "N/A";
+      if (selectedEmp.classifications.ft_start_date) {
          const start = getLocalDate(selectedEmp.classifications.ft_start_date);
          const nextDate = new Date(start);
-         nextDate.setFullYear(start.getFullYear() + nextTier.years);
+         // Add years to reach the NEXT anniversary relative to budget start
+         // (Simply: Start Date + (Current Years + 1))
+         nextDate.setFullYear(start.getFullYear() + nextYearInt);
          
-         // Format manually or ensure locale doesn't shift timezone
-         nextTierDateStr = nextDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-         
-         const nextVacHrs = nextTier.vacation_days * hoursPerDay;
-         const nextPersHrs = nextTier.personal_days * hoursPerDay;
-         const nextMonthly = (nextVacHrs + nextPersHrs) / 12;
-
-         nextTierStats = {
-             tierName: `${nextTier.years}+ Years`,
-             vacDays: nextTier.vacation_days,
-             persDays: nextTier.personal_days,
-             vacHrs: nextVacHrs,
-             persHrs: nextPersHrs,
-             monthly: nextMonthly
-         };
+         nextYearDateStr = nextDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
       }
-
-      // Convert Current Days back from hours (reverse calc) or just find tier
-      const curTier = policy.tiers.find(t => `${t.years}+ Years` === currentStats.tier) || policy.tiers[0];
-      const curVacDays = curTier?.vacation_days || 0;
-      const curPersDays = curTier?.personal_days || 0;
+      
+      // Calculate Next Year's Hours
+      const nextVacHrs = nextYearTier.vacation_days * hoursPerDay;
+      const nextPersHrs = nextYearTier.personal_days * hoursPerDay;
+      const nextMonthly = (nextVacHrs + nextPersHrs) / 12;
 
       return {
           current: {
-              tierName: currentStats.tier,
+              label: `${currentYearsInt} Years Service`,
               vacDays: curVacDays,
               persDays: curPersDays,
               vacHrs: curVacDays * hoursPerDay,
               persHrs: curPersDays * hoursPerDay,
+              totalDays: curVacDays + curPersDays,
+              totalHrs: (curVacDays + curPersDays) * hoursPerDay,
               monthly: currentStats.totalMonthly
           },
-          next: nextTierStats,
-          nextDate: nextTierDateStr,
+          next: {
+              label: `${nextYearInt} Years Service`,
+              vacDays: nextYearTier.vacation_days,
+              persDays: nextYearTier.personal_days,
+              vacHrs: nextVacHrs,
+              persHrs: nextPersHrs,
+              totalDays: nextYearTier.vacation_days + nextYearTier.personal_days,
+              totalHrs: nextVacHrs + nextPersHrs,
+              monthly: nextMonthly
+          },
+          nextDate: nextYearDateStr,
           shift: formatShiftLabel(selectedEmp.classifications.shift_schedule)
       };
   };
@@ -555,29 +569,38 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
                     {/* REFERENCE RATES (New Section) */}
                     <div className="mb-6 grid grid-cols-2 gap-4 text-xs">
                         <div className="border border-black p-2">
-                            <h4 className="font-bold uppercase border-b border-gray-300 mb-2 pb-1">Current Rate ({refs.current.tierName})</h4>
+                            <h4 className="font-bold uppercase border-b border-gray-300 mb-2 pb-1">Current Rate ({refs.current.label})</h4>
                             <div className="grid grid-cols-2 gap-x-4 gap-y-1">
                                 <div>Vacation:</div><div className="font-mono font-bold text-right">{refs.current.vacDays} days ({refs.current.vacHrs} hrs)</div>
                                 <div>Personal:</div><div className="font-mono font-bold text-right">{refs.current.persDays} days ({refs.current.persHrs} hrs)</div>
+                                
+                                {/* Total Row */}
+                                <div className="font-bold text-gray-700">Total:</div>
+                                <div className="font-mono font-bold text-right text-gray-700">
+                                    {refs.current.totalDays} days ({refs.current.totalHrs} hrs)
+                                </div>
+
                                 <div className="border-t border-gray-200 mt-1 pt-1 font-bold">Monthly:</div><div className="border-t border-gray-200 mt-1 pt-1 font-mono font-black text-right">{refs.current.monthly.toFixed(2)} hrs</div>
                             </div>
                         </div>
                         
-                        {refs.next ? (
-                             <div className="border border-black p-2 bg-gray-50">
-                                <h4 className="font-bold uppercase border-b border-gray-300 mb-2 pb-1 text-gray-600">Next Tier ({refs.next.tierName})</h4>
-                                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-gray-600">
-                                    <div>Effective:</div><div className="font-mono font-bold text-right text-black">{refs.nextDate}</div>
-                                    <div>Vacation:</div><div className="font-mono font-bold text-right text-black">{refs.next.vacDays} days ({refs.next.vacHrs} hrs)</div>
-                                    <div>Personal:</div><div className="font-mono font-bold text-right text-black">{refs.next.persDays} days ({refs.next.persHrs} hrs)</div>
-                                    <div className="border-t border-gray-300 mt-1 pt-1 font-bold">Monthly:</div><div className="border-t border-gray-300 mt-1 pt-1 font-mono font-bold text-right text-black">{refs.next.monthly.toFixed(2)} hrs</div>
+                        {/* Next Year Column */}
+                        <div className="border border-black p-2 bg-gray-50">
+                            <h4 className="font-bold uppercase border-b border-gray-300 mb-2 pb-1 text-gray-600">Renewal / Next Year ({refs.next.label})</h4>
+                            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-gray-600">
+                                <div>Effective:</div><div className="font-mono font-bold text-right text-black">{refs.nextDate}</div>
+                                <div>Vacation:</div><div className="font-mono font-bold text-right text-black">{refs.next.vacDays} days ({refs.next.vacHrs} hrs)</div>
+                                <div>Personal:</div><div className="font-mono font-bold text-right text-black">{refs.next.persDays} days ({refs.next.persHrs} hrs)</div>
+                                
+                                {/* Total Row */}
+                                <div className="font-bold text-gray-500">Total:</div>
+                                <div className="font-mono font-bold text-right text-black">
+                                    {refs.next.totalDays} days ({refs.next.totalHrs} hrs)
                                 </div>
-                             </div>
-                        ) : (
-                            <div className="border border-gray-200 p-2 flex items-center justify-center text-gray-400 italic">
-                                Max Tier Reached
+
+                                <div className="border-t border-gray-300 mt-1 pt-1 font-bold">Monthly:</div><div className="border-t border-gray-300 mt-1 pt-1 font-mono font-bold text-right text-black">{refs.next.monthly.toFixed(2)} hrs</div>
                             </div>
-                        )}
+                         </div>
                     </div>
 
                     {/* Table */}
