@@ -1,7 +1,7 @@
-import { useState, useMemo } from 'react';
-import { Employee, LeaveTransaction } from '../types';
+import { useState } from 'react';
+import { Employee, LeaveTransaction, LeavePolicyConfig, DEFAULT_POLICY } from '../types';
 import { calculateMonthlyAccrual, checkAnniversaryCap, formatShiftLabel } from '../services/leaveService';
-import { PlayCircle, ShieldCheck, Briefcase, Calendar, TrendingUp, LayoutGrid, List, Trash2, BookOpen, AlertTriangle } from 'lucide-react';
+import { PlayCircle, ShieldCheck, Briefcase, Calendar, TrendingUp, LayoutGrid, List, Trash2, BookOpen, Settings, Save, X } from 'lucide-react';
 import { useFeedback } from './FeedbackProvider';
 
 interface LeaveManagerProps {
@@ -12,11 +12,17 @@ interface LeaveManagerProps {
 export default function LeaveManager({ employees, setEmployees }: LeaveManagerProps) {
   const { notify, confirm } = useFeedback();
   const [selectedEmpId, setSelectedEmpId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'list' | 'master' | 'policy'>('list');
   const [showAdjustModal, setShowAdjustModal] = useState(false);
   
-  // Added 'policy' to the view mode state
-  const [viewMode, setViewMode] = useState<'list' | 'master' | 'policy'>('list');
-  
+  // --- EDITABLE POLICY STATE ---
+  // We initialize with saved policy from localStorage or fallback to default
+  const [policy, setPolicy] = useState<LeavePolicyConfig>(() => {
+      const saved = localStorage.getItem('leave_policy_config');
+      return saved ? JSON.parse(saved) : DEFAULT_POLICY;
+  });
+  const [isEditingPolicy, setIsEditingPolicy] = useState(false);
+
   // Adjustment Form State
   const [adjType, setAdjType] = useState<'Add' | 'Subtract'>('Add');
   const [adjAmount, setAdjAmount] = useState('');
@@ -25,57 +31,14 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
   const ftStaff = employees.filter(e => e.classifications.employment_type === 'Full Time');
   const selectedEmp = employees.find(e => e.id === selectedEmpId);
 
-  // --- DYNAMIC POLICY GENERATOR ---
-  // This calculates the tiers based on your actual code logic so the policy page is always accurate
-  const policyTable = useMemo(() => {
-    const yearsToTest = [0, 1, 2, 5, 6, 10, 11, 15, 16, 20];
-    const tiers: any[] = [];
-    
-    // Helper to create a date X years ago
-    const getDateAgo = (years: number) => {
-        const d = new Date();
-        d.setFullYear(d.getFullYear() - years);
-        d.setDate(d.getDate() - 1); 
-        return d.toISOString().split('T')[0];
-    };
+  // --- ACTIONS ---
 
-    yearsToTest.forEach(years => {
-        // Create a dummy employee to test the calculator
-        const dummyEmp = {
-            id: 'sim',
-            classifications: {
-                employment_type: 'Full Time',
-                ft_start_date: getDateAgo(years),
-                shift_schedule: '24/48' 
-            },
-            leave_bank: { vacation_balance: 0, personal_balance: 0 },
-            personal: { full_name: 'Test' }
-        } as unknown as Employee;
+  const handleSavePolicy = () => {
+      localStorage.setItem('leave_policy_config', JSON.stringify(policy));
+      setIsEditingPolicy(false);
+      notify('success', 'Policy updated successfully.');
+  };
 
-        const result = calculateMonthlyAccrual(dummyEmp);
-        
-        tiers.push({
-            years: years,
-            monthly: result.totalMonthly,
-            yearly: result.yearlyAllowance,
-            tierName: result.tier
-        });
-    });
-
-    // Remove duplicates to show only when the rate changes
-    const uniqueTiers = tiers.reduce((acc: any[], current) => {
-        const prev = acc[acc.length - 1];
-        if (!prev || prev.monthly !== current.monthly) {
-            acc.push(current);
-        }
-        return acc;
-    }, []);
-
-    return uniqueTiers;
-  }, []);
-
-
-   // --- 1. RUN MONTHLY ACCRUALS ---
   const handleRunMonthly = async () => {
     const currentMonth = new Date().toISOString().slice(0, 7); // "2024-03"
     const alreadyRunCount = ftStaff.filter(e => e.leave_bank?.last_accrual_date?.startsWith(currentMonth)).length;
@@ -98,7 +61,8 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
           return emp;
       }
 
-      const { vacation, personal, tier } = calculateMonthlyAccrual(emp);
+      // Pass the active policy to the calculation
+      const { vacation, personal, tier } = calculateMonthlyAccrual(emp, policy);
       
       const currentVac = emp.leave_bank?.vacation_balance || 0;
       const currentPers = emp.leave_bank?.personal_balance || 0;
@@ -130,7 +94,6 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
     notify('success', `Accruals: ${processedCount} Processed, ${skippedCount} Skipped.`);
   };
 
-  // --- 2. MANUAL ADJUSTMENT ---
   const handleManualAdjust = () => {
     if (!selectedEmp || !adjAmount) return;
     
@@ -164,7 +127,6 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
         id: `ADJ-${Date.now()}`,
         date: new Date().toISOString().split('T')[0],
         type: 'adjustment',
-        // Simplified attribution for the audit log
         amount_vacation: finalAmount > 0 ? finalAmount : (newVac - currentVac), 
         amount_personal: finalAmount > 0 ? 0 : (newPers - currentPers),
         description: `Manual: ${adjNote}`,
@@ -187,7 +149,6 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
     notify('success', 'Balance adjusted.');
   };
 
-  // --- 3. DELETE TRANSACTION ---
   const handleDeleteTransaction = async (txId: string) => {
     if (!selectedEmp || !selectedEmp.leave_bank) return;
 
@@ -238,17 +199,17 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
         <div className="flex gap-3">
             <div className="bg-gray-100 p-1 rounded-lg flex text-sm font-medium">
                 <button onClick={() => setViewMode('list')} className={`px-3 py-1.5 rounded-md flex items-center gap-2 ${viewMode === 'list' ? 'bg-white shadow text-gray-900' : 'text-gray-500'}`}>
-                    <List size={16}/> Split View
+                    <List size={16}/> List
                 </button>
                 <button onClick={() => setViewMode('master')} className={`px-3 py-1.5 rounded-md flex items-center gap-2 ${viewMode === 'master' ? 'bg-white shadow text-gray-900' : 'text-gray-500'}`}>
-                    <LayoutGrid size={16}/> Master Sheet
+                    <LayoutGrid size={16}/> Master
                 </button>
                 <button onClick={() => setViewMode('policy')} className={`px-3 py-1.5 rounded-md flex items-center gap-2 ${viewMode === 'policy' ? 'bg-white shadow text-gray-900' : 'text-gray-500'}`}>
                     <BookOpen size={16}/> Policy
                 </button>
             </div>
             <button onClick={handleRunMonthly} className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-2.5 rounded-lg hover:bg-emerald-700 shadow-md transition-all font-bold">
-               <PlayCircle size={18} /> Run Monthly Accruals
+               <PlayCircle size={18} /> Run Monthly
             </button>
         </div>
       </div>
@@ -265,7 +226,7 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
                  const total = vac + pers;
                  const rawShift = (emp.classifications as any).shift_schedule ?? (emp.classifications as any).shift_Schedule;
                  const shift = rawShift ? formatShiftLabel(rawShift) : 'Unknown';
-                 const stats = calculateMonthlyAccrual(emp);
+                 const stats = calculateMonthlyAccrual(emp, policy);
 
                  return (
                    <div key={emp.id} onClick={() => setSelectedEmpId(emp.id)} className={`p-4 rounded-xl border cursor-pointer hover:shadow-md transition-all ${selectedEmpId === emp.id ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500' : 'border-gray-200 bg-white'}`}>
@@ -317,10 +278,10 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
                   </div>
                   <div className="flex gap-2">
                      <button onClick={() => {
-                         const updated = checkAnniversaryCap(selectedEmp);
+                         const updated = checkAnniversaryCap(selectedEmp, policy);
                          setEmployees(employees.map(e => e.id === selectedEmp.id ? updated : e));
                          notify('success', 'Cap check complete');
-                     }} className="btn-secondary text-xs">Run Annual Cap Check</button>
+                     }} className="btn-secondary text-xs">Run Anniversary Cap</button>
                      <button onClick={() => setShowAdjustModal(true)} className="btn-primary bg-slate-800 text-white text-xs shadow-sm">Adjust Balance</button>
                   </div>
                </div>
@@ -333,8 +294,9 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
                                <th className="p-4 border-b">Date</th>
                                <th className="p-4 border-b">Type</th>
                                <th className="p-4 border-b">Description</th>
-                               <th className="p-4 border-b text-right">Change</th>
-                               <th className="p-4 border-b text-right bg-gray-50">Running Bal</th>
+                               <th className="p-4 border-b text-right">Vac</th>
+                               <th className="p-4 border-b text-right">Sick</th>
+                               <th className="p-4 border-b text-right bg-gray-50">Total</th>
                                <th className="p-4 border-b w-8 bg-gray-50"></th>
                             </tr>
                          </thead>
@@ -346,11 +308,14 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
                                       <td className="p-4 text-gray-600 whitespace-nowrap">{tx.date}</td>
                                       <td className="p-4"><span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${tx.type === 'accrual' ? 'bg-green-100 text-green-700' : tx.type === 'usage' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'}`}>{tx.type}</span></td>
                                       <td className="p-4 text-gray-900 font-medium">{tx.description}</td>
-                                      <td className={`p-4 text-right font-mono font-bold ${change > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                         {change > 0 ? '+' : ''}{change.toFixed(2)}
+                                      <td className={`p-4 text-right font-mono ${tx.amount_vacation > 0 ? 'text-green-600' : 'text-gray-400'}`}>
+                                         {tx.amount_vacation.toFixed(1)}
+                                      </td>
+                                      <td className={`p-4 text-right font-mono ${tx.amount_personal > 0 ? 'text-green-600' : 'text-gray-400'}`}>
+                                         {tx.amount_personal.toFixed(1)}
                                       </td>
                                       <td className="p-4 text-right font-mono font-bold text-gray-900 bg-gray-50 border-l border-gray-100">
-                                         {tx.balance_after.toFixed(2)}
+                                         {tx.balance_after.toFixed(1)}
                                       </td>
                                       <td className="p-2 text-center bg-gray-50">
                                           <button 
@@ -365,7 +330,7 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
                                );
                             })}
                             {(!selectedEmp.leave_bank?.history || selectedEmp.leave_bank.history.length === 0) && (
-                                <tr><td colSpan={6} className="p-12 text-center text-gray-400">No transaction history found.</td></tr>
+                                <tr><td colSpan={7} className="p-12 text-center text-gray-400">No transaction history found.</td></tr>
                             )}
                          </tbody>
                       </table>
@@ -402,7 +367,7 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
                     </thead>
                     <tbody className="divide-y divide-gray-100 text-sm">
                         {ftStaff.map(emp => {
-                            const stats = calculateMonthlyAccrual(emp);
+                            const stats = calculateMonthlyAccrual(emp, policy);
                             const vac = emp.leave_bank?.vacation_balance || 0;
                             const pers = emp.leave_bank?.personal_balance || 0;
                             const total = vac + pers;
@@ -425,92 +390,121 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
         </div>
       )}
 
-      {/* VIEW: POLICY / SETTINGS */}
+      {/* VIEW: POLICY (EDITABLE) */}
       {viewMode === 'policy' && (
           <div className="flex-1 overflow-auto p-8 max-w-5xl mx-auto w-full">
-            <div className="mb-8">
-                <h2 className="text-3xl font-bold text-gray-900">Leave Policy & Configuration</h2>
-                <p className="text-gray-500 mt-2">
-                    System parameters for automatic accruals and limits. 
-                    Calculations below are generated dynamically from the active codebase.
-                </p>
+            <div className="flex justify-between items-center mb-6">
+                <h2 className="text-3xl font-bold text-gray-900">Leave Policy Configuration</h2>
+                {!isEditingPolicy ? (
+                    <button onClick={() => setIsEditingPolicy(true)} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-blue-700"><Settings size={18}/> Edit Policy</button>
+                ) : (
+                    <div className="flex gap-2">
+                        <button onClick={() => setIsEditingPolicy(false)} className="flex items-center gap-2 bg-gray-200 text-gray-700 px-4 py-2 rounded-lg font-bold hover:bg-gray-300"><X size={18}/> Cancel</button>
+                        <button onClick={handleSavePolicy} className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-green-700"><Save size={18}/> Save Changes</button>
+                    </div>
+                )}
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                {/* Accrual Table */}
+            <div className="space-y-8">
+                {/* CAPS SECTION */}
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                    <h3 className="font-bold text-lg mb-4 flex items-center gap-2"><ShieldCheck className="text-blue-600"/> Anniversary Carry-Over Caps</h3>
+                    <div className="grid grid-cols-2 gap-8">
+                        <div>
+                            <label className="label">10-Hour Shift Cap (Hours)</label>
+                            <input 
+                                disabled={!isEditingPolicy} 
+                                type="number" 
+                                className={`input-std text-2xl font-black ${isEditingPolicy ? 'bg-white' : 'bg-gray-100'}`}
+                                value={policy.caps.shift_10}
+                                onChange={e => setPolicy({...policy, caps: {...policy.caps, shift_10: parseInt(e.target.value)||0}})}
+                            />
+                            <p className="text-xs text-gray-500 mt-1">Usually 50 Hrs (5 Days)</p>
+                        </div>
+                        <div>
+                            <label className="label">12-Hour Shift Cap (Hours)</label>
+                            <input 
+                                disabled={!isEditingPolicy} 
+                                type="number" 
+                                className={`input-std text-2xl font-black ${isEditingPolicy ? 'bg-white' : 'bg-gray-100'}`}
+                                value={policy.caps.shift_12}
+                                onChange={e => setPolicy({...policy, caps: {...policy.caps, shift_12: parseInt(e.target.value)||0}})}
+                            />
+                            <p className="text-xs text-gray-500 mt-1">Usually 60 Hrs (5 Days)</p>
+                        </div>
+                    </div>
+                </div>
+
+                {/* TIERS SECTION */}
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                    <div className="bg-slate-900 text-white p-4 border-b border-gray-200 flex justify-between items-center">
-                        <div className="font-bold flex items-center gap-2"><TrendingUp size={18}/> Accrual Tiers</div>
-                        <div className="text-xs opacity-75 uppercase">Based on Years of Service</div>
+                    <div className="bg-slate-900 text-white p-4 flex justify-between items-center">
+                        <h3 className="font-bold flex items-center gap-2"><TrendingUp/> Accrual Tiers (Based on Years of Service)</h3>
+                        <p className="text-xs opacity-75">Amounts are in DAYS per Year</p>
                     </div>
                     <table className="w-full text-sm text-left">
                         <thead className="bg-gray-50 text-xs uppercase font-bold text-gray-500">
                             <tr>
-                                <th className="p-4 border-b">Service Years</th>
-                                <th className="p-4 border-b">Monthly Accrual</th>
-                                <th className="p-4 border-b">Yearly Total</th>
+                                <th className="p-4">Start Year</th>
+                                <th className="p-4 w-40 text-center">Vacation Days</th>
+                                <th className="p-4 w-40 text-center">Sick/Pers Days</th>
+                                <th className="p-4 text-right">10-Hr Value</th>
+                                <th className="p-4 text-right">12-Hr Value</th>
+                                {isEditingPolicy && <th className="p-4 w-10"></th>}
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
-                            {policyTable.map((tier, idx) => (
+                            {policy.tiers.sort((a,b) => a.years - b.years).map((tier, idx) => (
                                 <tr key={idx} className="hover:bg-blue-50">
-                                    <td className="p-4 font-bold text-gray-900">
-                                        {tier.years} Years
-                                        {idx === 0 && <span className="ml-2 text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">ENTRY</span>}
+                                    <td className="p-4 font-bold">
+                                        {isEditingPolicy ? (
+                                            <input type="number" className="w-16 border rounded p-1" value={tier.years} onChange={e => {
+                                                const newTiers = [...policy.tiers];
+                                                newTiers[idx].years = parseInt(e.target.value);
+                                                setPolicy({...policy, tiers: newTiers});
+                                            }}/>
+                                        ) : `${tier.years}+ Years`}
                                     </td>
-                                    <td className="p-4 font-mono text-green-700 font-bold">+{tier.monthly.toFixed(2)} hrs</td>
-                                    <td className="p-4 font-mono text-gray-600">{tier.yearly.toFixed(0)} hrs</td>
+                                    <td className="p-4 text-center">
+                                        {isEditingPolicy ? (
+                                            <input type="number" className="w-20 border rounded p-1 text-center" value={tier.vacation_days} onChange={e => {
+                                                const newTiers = [...policy.tiers];
+                                                newTiers[idx].vacation_days = parseFloat(e.target.value);
+                                                setPolicy({...policy, tiers: newTiers});
+                                            }}/>
+                                        ) : tier.vacation_days}
+                                    </td>
+                                    <td className="p-4 text-center">
+                                        {isEditingPolicy ? (
+                                            <input type="number" className="w-20 border rounded p-1 text-center" value={tier.personal_days} onChange={e => {
+                                                const newTiers = [...policy.tiers];
+                                                newTiers[idx].personal_days = parseFloat(e.target.value);
+                                                setPolicy({...policy, tiers: newTiers});
+                                            }}/>
+                                        ) : tier.personal_days}
+                                    </td>
+                                    <td className="p-4 text-right font-mono text-gray-500">
+                                        {(tier.vacation_days * 10) + (tier.personal_days * 10)} hrs
+                                    </td>
+                                    <td className="p-4 text-right font-mono text-gray-500">
+                                        {(tier.vacation_days * 12) + (tier.personal_days * 12)} hrs
+                                    </td>
+                                    {isEditingPolicy && (
+                                        <td className="p-4 text-center">
+                                            <button onClick={() => {
+                                                const newTiers = policy.tiers.filter((_, i) => i !== idx);
+                                                setPolicy({...policy, tiers: newTiers});
+                                            }} className="text-red-500 hover:bg-red-50 p-1 rounded"><Trash2 size={16}/></button>
+                                        </td>
+                                    )}
                                 </tr>
                             ))}
                         </tbody>
                     </table>
-                    <div className="p-4 bg-gray-50 text-xs text-gray-500 border-t border-gray-200">
-                        * Tiers automatically adjust on the employee's anniversary date.
-                    </div>
-                </div>
-
-                {/* Rules & Caps */}
-                <div className="space-y-6">
-                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                        <h3 className="font-bold text-gray-900 flex items-center gap-2 mb-4"><ShieldCheck className="text-blue-600"/> Caps & Limits</h3>
-                        <div className="space-y-4">
-                            <div className="flex gap-4 items-start">
-                                <div className="mt-1 bg-amber-100 p-1.5 rounded text-amber-600"><AlertTriangle size={16}/></div>
-                                <div>
-                                    <h4 className="font-bold text-gray-800 text-sm">Anniversary Cap</h4>
-                                    <p className="text-xs text-gray-500 mt-1">
-                                        On an employee's anniversary, their total balance (Vacation + Personal) is checked.
-                                        Any hours exceeding the maximum carry-over limit are forfeited.
-                                    </p>
-                                </div>
-                            </div>
-                            <div className="flex gap-4 items-start">
-                                <div className="mt-1 bg-indigo-100 p-1.5 rounded text-indigo-600"><Calendar size={16}/></div>
-                                <div>
-                                    <h4 className="font-bold text-gray-800 text-sm">Monthly Run Cycle</h4>
-                                    <p className="text-xs text-gray-500 mt-1">
-                                        Accruals should be run once per month. The system prevents duplicate runs within the same calendar month.
-                                    </p>
-                                </div>
-                            </div>
+                    {isEditingPolicy && (
+                        <div className="p-4 bg-gray-50 border-t border-gray-200">
+                            <button onClick={() => setPolicy({...policy, tiers: [...policy.tiers, {years: 99, vacation_days: 0, personal_days: 0}]})} className="text-sm font-bold text-blue-600 hover:underline">+ Add New Tier</button>
                         </div>
-                    </div>
-
-                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                         <h3 className="font-bold text-gray-900 flex items-center gap-2 mb-4"><Briefcase className="text-emerald-600"/> Shift Definitions</h3>
-                         <div className="grid grid-cols-2 gap-4">
-                             <div className="p-3 bg-gray-50 rounded border border-gray-200 text-center">
-                                 <div className="text-xs text-gray-400 font-bold uppercase">Standard Shift</div>
-                                 <div className="text-lg font-black text-gray-800">24/48</div>
-                                 <div className="text-[10px] text-gray-500">2920 Hrs / Year</div>
-                             </div>
-                             <div className="p-3 bg-gray-50 rounded border border-gray-200 text-center">
-                                 <div className="text-xs text-gray-400 font-bold uppercase">Day Staff</div>
-                                 <div className="text-lg font-black text-gray-800">40 Hrs</div>
-                                 <div className="text-[10px] text-gray-500">2080 Hrs / Year</div>
-                             </div>
-                         </div>
-                    </div>
+                    )}
                 </div>
             </div>
           </div>

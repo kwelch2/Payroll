@@ -1,4 +1,4 @@
-import { Employee, LeaveTransaction } from '../types';
+import { Employee, LeaveTransaction, LeavePolicyConfig, DEFAULT_POLICY } from '../types';
 
 type NormalizedShiftSchedule = '10' | '12';
 
@@ -6,11 +6,13 @@ export function normalizeShiftSchedule(raw?: string): NormalizedShiftSchedule {
   const value = (raw || '').toString();
   if (value.includes('10')) return '10';
   if (value.includes('12') || value.includes('48')) return '12';
-  return '12';
+  // Default fallback if unknown
+  return '12'; 
 }
 
 export function formatShiftLabel(raw?: string): string {
-  return normalizeShiftSchedule(raw) === '12' ? '12-Hour Shift' : '10-Hour Shift';
+  const normalized = normalizeShiftSchedule(raw);
+  return normalized === '12' ? '12-Hour Shift' : '10-Hour Shift';
 }
 
 function getShiftScheduleValue(employee: Employee): string | undefined {
@@ -18,14 +20,18 @@ function getShiftScheduleValue(employee: Employee): string | undefined {
   return classifications.shift_schedule ?? classifications.shift_Schedule;
 }
 
-/**
- * Calculates the monthly accrual amounts based on Years of Service and Shift Type.
- */
-export function calculateMonthlyAccrual(employee: Employee) {
-  const startDate = employee.classifications.ft_start_date;
-  const shiftType = normalizeShiftSchedule(getShiftScheduleValue(employee));
+export function getShiftHours(employee: Employee): 10 | 12 {
+  const shift = normalizeShiftSchedule(getShiftScheduleValue(employee));
+  return shift === '10' ? 10 : 12;
+}
 
-  // Defaults for missing data
+/**
+ * Calculates the monthly accrual amounts based on Years of Service, Shift Type, AND Active Policy.
+ */
+export function calculateMonthlyAccrual(employee: Employee, policy: LeavePolicyConfig = DEFAULT_POLICY) {
+  const startDate = employee.classifications.ft_start_date;
+  
+  // Defaults for missing data or non-Full Time
   if (!startDate || employee.classifications.employment_type !== 'Full Time') {
     return { 
       vacation: 0, 
@@ -52,22 +58,24 @@ export function calculateMonthlyAccrual(employee: Employee) {
   years = Math.max(0, years);
 
   // 2. Determine Day Value (Hours)
-  const hoursPerDay = shiftType === '12' ? 12 : 10;
+  const hoursPerDay = getShiftHours(employee);
 
-  // 3. Determine Vacation Days Per Year
-  let vacationDays = 0;
-  let tierName = "";
+  // 3. Find Correct Policy Tier (Editable)
+  // We sort tiers by years descending to find the highest applicable tier
+  const activeTier = [...policy.tiers].sort((a, b) => b.years - a.years).find(t => years >= t.years);
 
-  if (years < 1) { vacationDays = 10; tierName = "Year 0-1 (10 Days)"; }
-  else if (years < 5) { vacationDays = 10; tierName = "Year 1-5 (10 Days)"; }
-  else if (years < 10) { vacationDays = 15; tierName = "Year 5-10 (15 Days)"; }
-  else if (years < 15) { vacationDays = 20; tierName = "Year 10-15 (20 Days)"; }
-  else if (years < 20) { vacationDays = 25; tierName = "Year 15-20 (25 Days)"; }
-  else { vacationDays = 30; tierName = "Year 20+ (30 Days)"; }
+  // Fallback if no tier matches (shouldn't happen with 0 year tier)
+  if (!activeTier) {
+      return { vacation: 0, personal: 0, totalMonthly: 0, tier: 'Unknown Tier', yearsOfService: years, yearlyAllowance: 0 };
+  }
+
+  const vacationDays = activeTier.vacation_days;
+  const personalDays = activeTier.personal_days;
+  const tierName = `${activeTier.years}+ Years (${vacationDays} Vac Days)`;
 
   // 4. Calculate Monthly Hours
   const vacationHours = (vacationDays * hoursPerDay) / 12;
-  const personalHours = (5 * hoursPerDay) / 12;
+  const personalHours = (personalDays * hoursPerDay) / 12;
 
   return {
     vacation: parseFloat(vacationHours.toFixed(4)),
@@ -75,7 +83,7 @@ export function calculateMonthlyAccrual(employee: Employee) {
     totalMonthly: parseFloat((vacationHours + personalHours).toFixed(4)),
     tier: tierName,
     yearsOfService: years,
-    yearlyAllowance: (vacationDays + 5) * hoursPerDay
+    yearlyAllowance: (vacationDays + personalDays) * hoursPerDay
   };
 }
 
@@ -90,6 +98,7 @@ export function processLeaveUsage(employee: Employee, hoursUsed: number, date: s
   let usedPersonal = 0;
   let usedVacation = 0;
 
+  // Logic: Deduct from Personal First
   if (bank.personal_balance > 0) {
     if (bank.personal_balance >= remaining) {
       usedPersonal = remaining;
@@ -102,6 +111,7 @@ export function processLeaveUsage(employee: Employee, hoursUsed: number, date: s
     }
   }
 
+  // Then Vacation
   if (remaining > 0) {
     usedVacation = remaining;
     bank.vacation_balance -= remaining;
@@ -126,7 +136,7 @@ export function processLeaveUsage(employee: Employee, hoursUsed: number, date: s
   };
 }
 
-export function checkAnniversaryCap(employee: Employee): Employee {
+export function checkAnniversaryCap(employee: Employee, policy: LeavePolicyConfig = DEFAULT_POLICY): Employee {
   const bank = employee.leave_bank;
   const shiftType = normalizeShiftSchedule(getShiftScheduleValue(employee));
   
@@ -135,18 +145,37 @@ export function checkAnniversaryCap(employee: Employee): Employee {
   bank.personal_balance = bank.personal_balance || 0;
   bank.vacation_balance = bank.vacation_balance || 0;
 
-  const cap = shiftType === '12' ? 60 : 50;
+  // Use values from the passed Policy object
+  const cap = shiftType === '12' ? policy.caps.shift_12 : policy.caps.shift_10;
+  const currentTotal = bank.vacation_balance + bank.personal_balance;
 
-  if (bank.personal_balance > cap) {
-    const forfeitAmount = bank.personal_balance - cap;
-    bank.personal_balance = cap;
+  if (currentTotal > cap) {
+    const forfeitAmount = currentTotal - cap;
+    
+    // Forfeit logic: Remove from Sick/Personal first, then Vacation if needed
+    // (You can swap this logic if you prefer to forfeit vacation first)
+    let remainingForfeit = forfeitAmount;
+    let forfeitPersonal = 0;
+    let forfeitVacation = 0;
+
+    if (bank.personal_balance >= remainingForfeit) {
+        forfeitPersonal = remainingForfeit;
+        bank.personal_balance -= remainingForfeit;
+    } else {
+        forfeitPersonal = bank.personal_balance;
+        remainingForfeit -= bank.personal_balance;
+        bank.personal_balance = 0;
+
+        forfeitVacation = remainingForfeit;
+        bank.vacation_balance -= remainingForfeit;
+    }
 
     const transaction: LeaveTransaction = {
       id: `TX-CAP-${Date.now()}`,
       date: new Date().toISOString().split('T')[0],
       type: 'adjustment',
-      amount_vacation: 0,
-      amount_personal: -forfeitAmount,
+      amount_vacation: -forfeitVacation,
+      amount_personal: -forfeitPersonal,
       description: `Annual Cap Adjustment (Max ${cap} hrs)`,
       balance_after: bank.vacation_balance + bank.personal_balance
     };

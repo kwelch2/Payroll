@@ -1,5 +1,34 @@
 // types.ts
 
+export interface AccrualTier {
+  years: number;
+  vacation_days: number; // "Days" will automatically convert to 10 or 12 hours based on shift
+  personal_days: number;
+}
+
+export interface LeavePolicyConfig {
+  caps: {
+    shift_10: number; // e.g. 50
+    shift_12: number; // e.g. 60
+  };
+  tiers: AccrualTier[];
+}
+
+export const DEFAULT_POLICY: LeavePolicyConfig = {
+  caps: {
+    shift_10: 50, // 5 days * 10 hrs
+    shift_12: 60  // 5 days * 12 hrs
+  },
+  tiers: [
+    { years: 0, vacation_days: 5, personal_days: 5 },   // Probation/Start
+    { years: 1, vacation_days: 10, personal_days: 5 },  // 1+ Years
+    { years: 5, vacation_days: 15, personal_days: 5 },  // 5+ Years
+    { years: 10, vacation_days: 20, personal_days: 5 }, // 10+ Years
+    { years: 15, vacation_days: 25, personal_days: 5 }, // 15+ Years
+    { years: 20, vacation_days: 30, personal_days: 5 }  // 20+ Years
+  ]
+};
+
 export interface PayCodeDefinition {
   code: string;
   label: string;
@@ -65,8 +94,6 @@ export interface Employee {
     ems_cert?: string;
     start_date_ems?: string;
     start_date_fire?: string;
-    
-    // --- UPDATED: Now expects simple '10' or '12' ---
     ft_start_date?: string;
     shift_schedule?: '10' | '12' | string; // 'string' allows legacy values temporarily
     pto_status?: 'Active' | 'Frozen';
