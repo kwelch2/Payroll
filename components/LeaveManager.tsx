@@ -1,21 +1,26 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { Employee, LeaveTransaction, LeavePolicyConfig, DEFAULT_POLICY } from '../types';
 import { calculateMonthlyAccrual, checkAnniversaryCap, formatShiftLabel } from '../services/leaveService';
-import { PlayCircle, ShieldCheck, Briefcase, Calendar, TrendingUp, LayoutGrid, List, Trash2, BookOpen, Settings, Save, X, Cloud } from 'lucide-react';
+import { PlayCircle, ShieldCheck, Briefcase, Calendar, TrendingUp, LayoutGrid, List, Trash2, BookOpen, Settings, Save, X, Cloud, Printer, FileText } from 'lucide-react';
 import { useFeedback } from './FeedbackProvider';
 
 interface LeaveManagerProps {
   employees: Employee[];
   setEmployees: (employees: Employee[]) => void;
-  onSave: () => void; // <--- ADDED DEFINITION
+  onSave: () => void;
 }
 
 export default function LeaveManager({ employees, setEmployees, onSave }: LeaveManagerProps) {
   const { notify, confirm } = useFeedback();
   const [selectedEmpId, setSelectedEmpId] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'list' | 'master' | 'policy'>('list');
+  
+  // View Modes: 'list' | 'master' | 'policy' | 'budget'
+  const [viewMode, setViewMode] = useState<'list' | 'master' | 'policy' | 'budget'>('list');
   const [showAdjustModal, setShowAdjustModal] = useState(false);
   
+  // --- BUDGET REPORT STATE ---
+  const [budgetStartYear, setBudgetStartYear] = useState(new Date().getFullYear() - (new Date().getMonth() < 9 ? 1 : 0)); // Defaults to current budget year (e.g. 2024 if Oct 2024)
+
   // --- EDITABLE POLICY STATE ---
   const [policy, setPolicy] = useState<LeavePolicyConfig>(() => {
       const saved = localStorage.getItem('leave_policy_config');
@@ -37,6 +42,10 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
       localStorage.setItem('leave_policy_config', JSON.stringify(policy));
       setIsEditingPolicy(false);
       notify('success', 'Policy updated successfully.');
+  };
+
+  const handlePrint = () => {
+    window.print();
   };
 
   const handleRunMonthly = async () => {
@@ -95,15 +104,13 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
 
   const handleManualAdjust = () => {
     if (!selectedEmp || !adjAmount) return;
-    
+    const amount = parseFloat(adjAmount);
+    if (isNaN(amount)) return;
+    const finalAmount = adjType === 'Add' ? amount : -amount;
+
     const currentVac = selectedEmp.leave_bank?.vacation_balance || 0;
     const currentPers = selectedEmp.leave_bank?.personal_balance || 0;
     const history = selectedEmp.leave_bank?.history || [];
-
-    const amount = parseFloat(adjAmount);
-    if (isNaN(amount)) return;
-
-    const finalAmount = adjType === 'Add' ? amount : -amount;
 
     let newVac = currentVac;
     let newPers = currentPers;
@@ -149,23 +156,13 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
 
   const handleDeleteTransaction = async (txId: string) => {
     if (!selectedEmp || !selectedEmp.leave_bank) return;
-
     const txIndex = selectedEmp.leave_bank.history.findIndex(t => t.id === txId);
     if (txIndex === -1) return;
     const tx = selectedEmp.leave_bank.history[txIndex];
-
-    const approved = await confirm({
-      title: 'Delete Entry?',
-      message: 'This will remove the record and revert the balance change. Are you sure?',
-      confirmLabel: 'Delete Record',
-      cancelLabel: 'Cancel'
-    });
-    
-    if (!approved) return;
+    if (!await confirm({ title: 'Delete Entry?', message: 'Delete this record?', confirmLabel: 'Delete' })) return;
 
     const newVac = selectedEmp.leave_bank.vacation_balance - tx.amount_vacation;
     const newPers = selectedEmp.leave_bank.personal_balance - tx.amount_personal;
-    
     const newHistory = [...selectedEmp.leave_bank.history];
     newHistory.splice(txIndex, 1);
 
@@ -178,16 +175,37 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
         history: newHistory
       }
     };
-
     setEmployees(employees.map(e => e.id === selectedEmp.id ? updatedEmp : e));
-    notify('success', 'Entry deleted and balance reverted.');
+    notify('success', 'Entry deleted.');
+  };
+
+  // Helper for Budget Sheet Generation
+  const generateBudgetRows = () => {
+      if (!selectedEmp) return [];
+      const rows = [];
+      const startDate = new Date(budgetStartYear, 9, 1); // Oct 1st
+      
+      for (let i = 0; i < 12; i++) {
+          const currentDate = new Date(startDate);
+          currentDate.setMonth(startDate.getMonth() + i);
+          
+          // Use our updated service to project accrual for this specific future/past date
+          const stats = calculateMonthlyAccrual(selectedEmp, policy, currentDate);
+          
+          rows.push({
+              month: currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
+              accrual: stats.totalMonthly,
+              tier: stats.tier // Useful to see if tier changed during the year
+          });
+      }
+      return rows;
   };
 
   return (
     <div className="h-full flex flex-col bg-gray-50">
       
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200 p-6 flex justify-between items-center shadow-sm">
+      {/* HEADER (Hidden when printing budget) */}
+      <div className="bg-white border-b border-gray-200 p-6 flex justify-between items-center shadow-sm print:hidden">
         <div>
           <h2 className="text-2xl font-bold text-gray-900">Leave Management</h2>
           <p className="text-sm text-gray-500">Track Vacation & Personal leave for Full-Time staff</p>
@@ -200,11 +218,13 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
                 <button onClick={() => setViewMode('master')} className={`px-3 py-1.5 rounded-md flex items-center gap-2 ${viewMode === 'master' ? 'bg-white shadow text-gray-900' : 'text-gray-500'}`}>
                     <LayoutGrid size={16}/> Master
                 </button>
+                <button onClick={() => setViewMode('budget')} className={`px-3 py-1.5 rounded-md flex items-center gap-2 ${viewMode === 'budget' ? 'bg-white shadow text-gray-900' : 'text-gray-500'}`}>
+                    <FileText size={16}/> Budget Sheet
+                </button>
                 <button onClick={() => setViewMode('policy')} className={`px-3 py-1.5 rounded-md flex items-center gap-2 ${viewMode === 'policy' ? 'bg-white shadow text-gray-900' : 'text-gray-500'}`}>
                     <BookOpen size={16}/> Policy
                 </button>
             </div>
-            {/* SAVE BUTTON ADDED HERE */}
             <button onClick={onSave} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg hover:bg-blue-700 shadow-md transition-all font-bold">
                <Cloud size={18} /> Save Changes
             </button>
@@ -302,7 +322,6 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
                          </thead>
                          <tbody className="divide-y divide-gray-100">
                             {(selectedEmp.leave_bank?.history || []).map((tx: any) => {
-                               const change = tx.amount_vacation + tx.amount_personal;
                                return (
                                    <tr key={tx.id} className="hover:bg-gray-50 transition-colors group">
                                       <td className="p-4 text-gray-600 whitespace-nowrap">{tx.date}</td>
@@ -387,6 +406,123 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
                     </tbody>
                 </table>
             </div>
+        </div>
+      )}
+
+      {/* VIEW: BUDGET SHEET (PRINTABLE) */}
+      {viewMode === 'budget' && (
+        <div className="flex-1 bg-gray-100 p-8 overflow-auto flex justify-center">
+            {/* Control Panel - Hidden on Print */}
+            <div className="fixed top-24 right-8 bg-white p-4 rounded-xl shadow-xl border border-gray-200 w-64 print:hidden z-50">
+                <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2"><Settings size={16}/> Report Settings</h3>
+                <div className="space-y-3">
+                    <div>
+                        <label className="text-xs font-bold text-gray-500 uppercase block mb-1">Employee</label>
+                        <select className="w-full p-2 border rounded text-sm" value={selectedEmpId || ''} onChange={e => setSelectedEmpId(e.target.value)}>
+                            <option value="">Select Employee...</option>
+                            {ftStaff.map(e => <option key={e.id} value={e.id}>{e.personal.full_name}</option>)}
+                        </select>
+                    </div>
+                    <div>
+                        <label className="text-xs font-bold text-gray-500 uppercase block mb-1">Budget Year Start</label>
+                        <select className="w-full p-2 border rounded text-sm" value={budgetStartYear} onChange={e => setBudgetStartYear(parseInt(e.target.value))}>
+                            {[...Array(5)].map((_, i) => {
+                                const y = new Date().getFullYear() - 2 + i;
+                                return <option key={y} value={y}>Oct {y} - Sept {y+1}</option>
+                            })}
+                        </select>
+                    </div>
+                    <button onClick={handlePrint} className="w-full py-2 bg-slate-900 text-white font-bold rounded hover:bg-slate-800 flex items-center justify-center gap-2">
+                        <Printer size={16}/> Print Sheet
+                    </button>
+                </div>
+            </div>
+
+            {/* The Physical Paper Sheet */}
+            {selectedEmp ? (
+                <div className="bg-white shadow-lg print:shadow-none w-[8.5in] min-h-[11in] p-12 print:p-0 print:w-full mx-auto text-black">
+                    <div className="text-center border-b-2 border-black pb-4 mb-6">
+                        <h1 className="text-2xl font-black uppercase tracking-wider">Leave Tracking Sheet</h1>
+                        <p className="text-sm font-bold mt-1">Budget Year: Oct 1, {budgetStartYear} — Sept 30, {budgetStartYear + 1}</p>
+                    </div>
+
+                    <div className="flex justify-between mb-8 text-sm">
+                        <div className="space-y-1">
+                            <p><span className="font-bold">Employee:</span> {selectedEmp.personal.full_name}</p>
+                            <p><span className="font-bold">Classification:</span> {selectedEmp.classifications.pay_level} / {formatShiftLabel(selectedEmp.classifications.shift_schedule)}</p>
+                        </div>
+                        <div className="space-y-1 text-right">
+                            <p><span className="font-bold">Start Date:</span> {selectedEmp.classifications.ft_start_date}</p>
+                            <p><span className="font-bold">ID:</span> {selectedEmp.employee_id || '---'}</p>
+                        </div>
+                    </div>
+
+                    <table className="w-full border-collapse border border-black text-sm">
+                        <thead>
+                            <tr className="bg-gray-100 print:bg-gray-200">
+                                <th className="border border-black p-2 text-left w-1/4">Month</th>
+                                <th className="border border-black p-2 text-center w-32">Balance Forward</th>
+                                <th className="border border-black p-2 text-center w-24">Accrued (+)</th>
+                                <th className="border border-black p-2 text-center w-24">Used (-)</th>
+                                <th className="border border-black p-2 text-center w-32">New Balance</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {/* Carry Over Row */}
+                            <tr>
+                                <td className="border border-black p-2 font-bold bg-gray-50">STARTING BALANCE</td>
+                                <td className="border border-black p-2 text-center font-bold text-gray-400 italic">---</td>
+                                <td className="border border-black p-2"></td>
+                                <td className="border border-black p-2"></td>
+                                <td className="border border-black p-2"></td>
+                            </tr>
+                            
+                            {/* Monthly Rows */}
+                            {generateBudgetRows().map((row, idx) => (
+                                <tr key={idx} className="h-12">
+                                    <td className="border border-black p-2 font-medium">
+                                        {row.month}
+                                        <div className="text-[10px] text-gray-500 font-normal">{row.tier}</div>
+                                    </td>
+                                    <td className="border border-black p-2"></td>
+                                    <td className="border border-black p-2 text-center font-bold text-gray-800">
+                                        {row.accrual.toFixed(2)}
+                                    </td>
+                                    <td className="border border-black p-2"></td>
+                                    <td className="border border-black p-2"></td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+
+                    <div className="mt-12 pt-8 border-t border-black flex justify-between text-xs">
+                        <div>
+                            <p className="font-bold mb-8">Employee Signature: ___________________________________</p>
+                        </div>
+                        <div>
+                            <p className="font-bold">Chief / Supervisor: ___________________________________</p>
+                        </div>
+                    </div>
+                </div>
+            ) : (
+                <div className="flex items-center justify-center h-96 text-gray-400 font-bold text-xl uppercase tracking-widest">
+                    Select an Employee to Generate Sheet
+                </div>
+            )}
+            
+            {/* Print Styles Injection */}
+            <style>{`
+                @media print {
+                    @page { margin: 0.5in; size: portrait; }
+                    body { background: white; -webkit-print-color-adjust: exact; }
+                    .print\\:hidden { display: none !important; }
+                    .print\\:w-full { width: 100% !important; }
+                    .print\\:shadow-none { shadow: none !important; }
+                    /* Hide Sidebar and other layout elements if possible, usually fixed full screen covers it */
+                    nav, header, aside { display: none !important; }
+                    .overflow-auto { overflow: visible !important; }
+                }
+            `}</style>
         </div>
       )}
 
