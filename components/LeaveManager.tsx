@@ -13,12 +13,13 @@ interface LeaveManagerProps {
 export default function LeaveManager({ employees, setEmployees, onSave }: LeaveManagerProps) {
   const { notify, confirm } = useFeedback();
   const [selectedEmpId, setSelectedEmpId] = useState<string | null>(null);
-  
+   
   // View Modes
   const [viewMode, setViewMode] = useState<'list' | 'master' | 'policy' | 'budget'>('list');
   const [showAdjustModal, setShowAdjustModal] = useState(false);
-  
+   
   // --- BUDGET REPORT STATE ---
+  // Default to Oct 1st of current year (or previous year if we are in Jan-Sept)
   const defaultBudgetStart = () => {
     const now = new Date();
     const year = now.getMonth() >= 9 ? now.getFullYear() : now.getFullYear() - 1;
@@ -202,11 +203,7 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
           const currentDate = new Date(startDate);
           currentDate.setMonth(startDate.getMonth() + i);
           
-          // CRITICAL: We pass the END of the month to calculate accrual.
-          // This ensures if the anniversary falls on the 15th, they get the NEW rate for this month.
-          const effectiveDateForTier = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0); 
-          
-          const stats = calculateMonthlyAccrual(selectedEmp, policy, effectiveDateForTier);
+          const stats = calculateMonthlyAccrual(selectedEmp, policy, currentDate);
           
           // Check for Anniversary Month
           const isAnniversary = currentDate.getMonth() === startMonth;
@@ -226,7 +223,7 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
   const getReferenceRates = () => {
       if (!selectedEmp) return null;
       
-      // Current Stats (Using start date to be safe)
+      // Current Stats
       const currentStats = calculateMonthlyAccrual(selectedEmp, policy, new Date(budgetStartDate));
       const hoursPerDay = getShiftHours(selectedEmp);
       
@@ -242,9 +239,6 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
          const start = new Date(selectedEmp.classifications.ft_start_date);
          const nextDate = new Date(start);
          nextDate.setFullYear(start.getFullYear() + nextTier.years);
-         
-         // Set to 1st of that month as requested
-         nextDate.setDate(1); 
          nextTierDateStr = nextDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
          
          const nextVacHrs = nextTier.vacation_days * hoursPerDay;
@@ -261,7 +255,7 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
          };
       }
 
-      // Current Tier Breakdown
+      // Convert Current Days back from hours (reverse calc) or just find tier
       const curTier = policy.tiers.find(t => `${t.years}+ Years` === currentStats.tier) || policy.tiers[0];
       const curVacDays = curTier?.vacation_days || 0;
       const curPersDays = curTier?.personal_days || 0;
@@ -333,7 +327,7 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
                  return (
                    <div key={emp.id} onClick={() => setSelectedEmpId(emp.id)} className={`p-4 rounded-xl border cursor-pointer hover:shadow-md transition-all ${selectedEmpId === emp.id ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500' : 'border-gray-200 bg-white'}`}>
                       <div className="flex justify-between items-start mb-3">
-                         <div>
+                          <div>
                            <h3 className="font-bold text-gray-900 text-lg">{emp.personal.full_name}</h3>
                            <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
                               <span className="bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">{shift}</span>
@@ -342,11 +336,11 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
                                 {stats.yearsOfService.toFixed(1)} Years Svc
                               </span>
                            </div>
-                         </div>
-                         <div className="text-right">
-                            <span className="block text-2xl font-black text-blue-600">{total.toFixed(2)}</span>
-                            <span className="text-[10px] uppercase font-bold text-gray-400">Current Balance</span>
-                         </div>
+                          </div>
+                          <div className="text-right">
+                             <span className="block text-2xl font-black text-blue-600">{total.toFixed(2)}</span>
+                             <span className="text-[10px] uppercase font-bold text-gray-400">Current Balance</span>
+                          </div>
                       </div>
 
                       <div className="grid grid-cols-3 gap-2 pt-3 border-t border-gray-100">
@@ -375,16 +369,16 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
              <div className="flex-1 flex flex-col">
                <div className="p-6 border-b border-gray-200 bg-white flex justify-between items-center shadow-sm z-10">
                   <div>
-                     <h3 className="text-lg font-bold text-gray-900">Audit Log: {selectedEmp.personal.full_name}</h3>
-                     <p className="text-xs text-gray-500">Official record of Accruals and Usage</p>
+                      <h3 className="text-lg font-bold text-gray-900">Audit Log: {selectedEmp.personal.full_name}</h3>
+                      <p className="text-xs text-gray-500">Official record of Accruals and Usage</p>
                   </div>
                   <div className="flex gap-2">
-                     <button onClick={() => {
-                         const updated = checkAnniversaryCap(selectedEmp, policy);
-                         setEmployees(employees.map(e => e.id === selectedEmp.id ? updated : e));
-                         notify('success', 'Cap check complete');
-                     }} className="btn-secondary text-xs">Run Anniversary Cap</button>
-                     <button onClick={() => setShowAdjustModal(true)} className="btn-primary bg-slate-800 text-white text-xs shadow-sm">Adjust Balance</button>
+                      <button onClick={() => {
+                          const updated = checkAnniversaryCap(selectedEmp, policy);
+                          setEmployees(employees.map(e => e.id === selectedEmp.id ? updated : e));
+                          notify('success', 'Cap check complete');
+                      }} className="btn-secondary text-xs">Run Anniversary Cap</button>
+                      <button onClick={() => setShowAdjustModal(true)} className="btn-primary bg-slate-800 text-white text-xs shadow-sm">Adjust Balance</button>
                   </div>
                </div>
 
@@ -601,14 +595,10 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
                                         {row.month}
                                         <div className="text-[9px] text-gray-500 font-normal">{row.tier}</div>
                                         {row.isAnniversary && (
-                                            <div className="text-[9px] font-bold text-red-600 print:text-black mt-0.5">⚠️ ANNIVERSARY MONTH</div>
+                                            <div className="text-[9px] font-bold text-red-600 print:text-black mt-0.5">⚠️ ANNIVERSARY - CHECK CAP (Max {row.capAmount} Hrs)</div>
                                         )}
                                     </td>
-                                    <td className="border border-black p-1 text-center">
-                                        {row.isAnniversary && (
-                                            <span className="text-[9px] block font-bold text-red-600 print:text-black mt-1">CHECK CAP HERE (Max {row.capAmount})</span>
-                                        )}
-                                    </td>
+                                    <td className="border border-black p-1"></td>
                                     <td className="border border-black p-1 text-center font-bold text-gray-800">
                                         {row.accrual.toFixed(2)}
                                     </td>
