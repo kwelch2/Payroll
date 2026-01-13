@@ -170,7 +170,7 @@ function AppContent() {
       )}
       
       {activeTab === 'leave' && (
-        <LeaveManager employees={employees} setEmployees={setEmployees} />
+        <LeaveManager employees={employees} setEmployees={setEmployees} onSave={handleSaveToDrive}/>
       )}
       
       {activeTab === 'reports' && <Reports />}

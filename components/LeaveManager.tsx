@@ -1,22 +1,22 @@
 import { useState } from 'react';
 import { Employee, LeaveTransaction, LeavePolicyConfig, DEFAULT_POLICY } from '../types';
 import { calculateMonthlyAccrual, checkAnniversaryCap, formatShiftLabel } from '../services/leaveService';
-import { PlayCircle, ShieldCheck, Briefcase, Calendar, TrendingUp, LayoutGrid, List, Trash2, BookOpen, Settings, Save, X } from 'lucide-react';
+import { PlayCircle, ShieldCheck, Briefcase, Calendar, TrendingUp, LayoutGrid, List, Trash2, BookOpen, Settings, Save, X, Cloud } from 'lucide-react';
 import { useFeedback } from './FeedbackProvider';
 
 interface LeaveManagerProps {
   employees: Employee[];
   setEmployees: (employees: Employee[]) => void;
+  onSave: () => void; // <--- ADDED DEFINITION
 }
 
-export default function LeaveManager({ employees, setEmployees }: LeaveManagerProps) {
+export default function LeaveManager({ employees, setEmployees, onSave }: LeaveManagerProps) {
   const { notify, confirm } = useFeedback();
   const [selectedEmpId, setSelectedEmpId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'list' | 'master' | 'policy'>('list');
   const [showAdjustModal, setShowAdjustModal] = useState(false);
   
   // --- EDITABLE POLICY STATE ---
-  // We initialize with saved policy from localStorage or fallback to default
   const [policy, setPolicy] = useState<LeavePolicyConfig>(() => {
       const saved = localStorage.getItem('leave_policy_config');
       return saved ? JSON.parse(saved) : DEFAULT_POLICY;
@@ -40,7 +40,7 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
   };
 
   const handleRunMonthly = async () => {
-    const currentMonth = new Date().toISOString().slice(0, 7); // "2024-03"
+    const currentMonth = new Date().toISOString().slice(0, 7); 
     const alreadyRunCount = ftStaff.filter(e => e.leave_bank?.last_accrual_date?.startsWith(currentMonth)).length;
     
     let message = 'This will add Vacation & Personal hours to all active Full Time staff.';
@@ -61,7 +61,6 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
           return emp;
       }
 
-      // Pass the active policy to the calculation
       const { vacation, personal, tier } = calculateMonthlyAccrual(emp, policy);
       
       const currentVac = emp.leave_bank?.vacation_balance || 0;
@@ -112,7 +111,6 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
     if (finalAmount > 0) {
         newVac += finalAmount; 
     } else {
-        // Logic: Deduct from Personal first, then Vacation
         let remaining = Math.abs(finalAmount);
         if (newPers >= remaining) {
             newPers -= remaining;
@@ -165,11 +163,9 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
     
     if (!approved) return;
 
-    // Calculate new balances by reversing the transaction
     const newVac = selectedEmp.leave_bank.vacation_balance - tx.amount_vacation;
     const newPers = selectedEmp.leave_bank.personal_balance - tx.amount_personal;
     
-    // Remove from history
     const newHistory = [...selectedEmp.leave_bank.history];
     newHistory.splice(txIndex, 1);
 
@@ -208,6 +204,10 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
                     <BookOpen size={16}/> Policy
                 </button>
             </div>
+            {/* SAVE BUTTON ADDED HERE */}
+            <button onClick={onSave} className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2.5 rounded-lg hover:bg-blue-700 shadow-md transition-all font-bold">
+               <Cloud size={18} /> Save Changes
+            </button>
             <button onClick={handleRunMonthly} className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-2.5 rounded-lg hover:bg-emerald-700 shadow-md transition-all font-bold">
                <PlayCircle size={18} /> Run Monthly
             </button>
