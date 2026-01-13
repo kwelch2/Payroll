@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Employee, LeaveTransaction } from '../types';
 import { calculateMonthlyAccrual, checkAnniversaryCap, formatShiftLabel } from '../services/leaveService';
-import { PlayCircle, ShieldCheck, Briefcase, Calendar, TrendingUp, LayoutGrid, List, Trash2 } from 'lucide-react';
+import { PlayCircle, ShieldCheck, Briefcase, Calendar, TrendingUp, LayoutGrid, List, Trash2, BookOpen, AlertTriangle } from 'lucide-react';
 import { useFeedback } from './FeedbackProvider';
 
 interface LeaveManagerProps {
@@ -13,7 +13,9 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
   const { notify, confirm } = useFeedback();
   const [selectedEmpId, setSelectedEmpId] = useState<string | null>(null);
   const [showAdjustModal, setShowAdjustModal] = useState(false);
-  const [viewMode, setViewMode] = useState<'list' | 'master'>('list');
+  
+  // Added 'policy' to the view mode state
+  const [viewMode, setViewMode] = useState<'list' | 'master' | 'policy'>('list');
   
   // Adjustment Form State
   const [adjType, setAdjType] = useState<'Add' | 'Subtract'>('Add');
@@ -23,9 +25,58 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
   const ftStaff = employees.filter(e => e.classifications.employment_type === 'Full Time');
   const selectedEmp = employees.find(e => e.id === selectedEmpId);
 
-   // --- 1. RUN MONTHLY ACCRUALS (With Duplicate Check) ---
+  // --- DYNAMIC POLICY GENERATOR ---
+  // This calculates the tiers based on your actual code logic so the policy page is always accurate
+  const policyTable = useMemo(() => {
+    const yearsToTest = [0, 1, 2, 5, 6, 10, 11, 15, 16, 20];
+    const tiers: any[] = [];
+    
+    // Helper to create a date X years ago
+    const getDateAgo = (years: number) => {
+        const d = new Date();
+        d.setFullYear(d.getFullYear() - years);
+        d.setDate(d.getDate() - 1); 
+        return d.toISOString().split('T')[0];
+    };
+
+    yearsToTest.forEach(years => {
+        // Create a dummy employee to test the calculator
+        const dummyEmp = {
+            id: 'sim',
+            classifications: {
+                employment_type: 'Full Time',
+                ft_start_date: getDateAgo(years),
+                shift_schedule: '24/48' 
+            },
+            leave_bank: { vacation_balance: 0, personal_balance: 0 },
+            personal: { full_name: 'Test' }
+        } as unknown as Employee;
+
+        const result = calculateMonthlyAccrual(dummyEmp);
+        
+        tiers.push({
+            years: years,
+            monthly: result.totalMonthly,
+            yearly: result.yearlyAllowance,
+            tierName: result.tier
+        });
+    });
+
+    // Remove duplicates to show only when the rate changes
+    const uniqueTiers = tiers.reduce((acc: any[], current) => {
+        const prev = acc[acc.length - 1];
+        if (!prev || prev.monthly !== current.monthly) {
+            acc.push(current);
+        }
+        return acc;
+    }, []);
+
+    return uniqueTiers;
+  }, []);
+
+
+   // --- 1. RUN MONTHLY ACCRUALS ---
   const handleRunMonthly = async () => {
-    // Check how many have already run this month
     const currentMonth = new Date().toISOString().slice(0, 7); // "2024-03"
     const alreadyRunCount = ftStaff.filter(e => e.leave_bank?.last_accrual_date?.startsWith(currentMonth)).length;
     
@@ -40,10 +91,8 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
     let skippedCount = 0;
 
     const updatedStaff = employees.map(emp => {
-      // Logic Checks
       if (emp.classifications.employment_type !== 'Full Time' || emp.classifications.pto_status === 'Frozen') return emp;
 
-      // Duplicate Check
       if (emp.leave_bank?.last_accrual_date?.startsWith(currentMonth)) {
           skippedCount++;
           return emp;
@@ -51,7 +100,6 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
 
       const { vacation, personal, tier } = calculateMonthlyAccrual(emp);
       
-      // Init bank safely
       const currentVac = emp.leave_bank?.vacation_balance || 0;
       const currentPers = emp.leave_bank?.personal_balance || 0;
       const history = emp.leave_bank?.history || [];
@@ -79,14 +127,13 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
     });
 
     setEmployees(updatedStaff);
-    notify('success', `Accruals: ${processedCount} Processed, ${skippedCount} Skipped (Already Done).`);
+    notify('success', `Accruals: ${processedCount} Processed, ${skippedCount} Skipped.`);
   };
 
   // --- 2. MANUAL ADJUSTMENT ---
   const handleManualAdjust = () => {
     if (!selectedEmp || !adjAmount) return;
     
-    // Safely init values
     const currentVac = selectedEmp.leave_bank?.vacation_balance || 0;
     const currentPers = selectedEmp.leave_bank?.personal_balance || 0;
     const history = selectedEmp.leave_bank?.history || [];
@@ -102,6 +149,7 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
     if (finalAmount > 0) {
         newVac += finalAmount; 
     } else {
+        // Logic: Deduct from Personal first, then Vacation
         let remaining = Math.abs(finalAmount);
         if (newPers >= remaining) {
             newPers -= remaining;
@@ -116,7 +164,8 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
         id: `ADJ-${Date.now()}`,
         date: new Date().toISOString().split('T')[0],
         type: 'adjustment',
-        amount_vacation: finalAmount > 0 ? finalAmount : (newVac - currentVac),
+        // Simplified attribution for the audit log
+        amount_vacation: finalAmount > 0 ? finalAmount : (newVac - currentVac), 
         amount_personal: finalAmount > 0 ? 0 : (newPers - currentPers),
         description: `Manual: ${adjNote}`,
         balance_after: newVac + newPers
@@ -193,6 +242,9 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
                 </button>
                 <button onClick={() => setViewMode('master')} className={`px-3 py-1.5 rounded-md flex items-center gap-2 ${viewMode === 'master' ? 'bg-white shadow text-gray-900' : 'text-gray-500'}`}>
                     <LayoutGrid size={16}/> Master Sheet
+                </button>
+                <button onClick={() => setViewMode('policy')} className={`px-3 py-1.5 rounded-md flex items-center gap-2 ${viewMode === 'policy' ? 'bg-white shadow text-gray-900' : 'text-gray-500'}`}>
+                    <BookOpen size={16}/> Policy
                 </button>
             </div>
             <button onClick={handleRunMonthly} className="flex items-center gap-2 bg-emerald-600 text-white px-4 py-2.5 rounded-lg hover:bg-emerald-700 shadow-md transition-all font-bold">
@@ -331,7 +383,7 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
       </div>
       )}
 
-      {/* VIEW: MASTER SHEET (NEW) */}
+      {/* VIEW: MASTER SHEET */}
       {viewMode === 'master' && (
         <div className="flex-1 overflow-auto p-6">
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
@@ -371,6 +423,97 @@ export default function LeaveManager({ employees, setEmployees }: LeaveManagerPr
                 </table>
             </div>
         </div>
+      )}
+
+      {/* VIEW: POLICY / SETTINGS */}
+      {viewMode === 'policy' && (
+          <div className="flex-1 overflow-auto p-8 max-w-5xl mx-auto w-full">
+            <div className="mb-8">
+                <h2 className="text-3xl font-bold text-gray-900">Leave Policy & Configuration</h2>
+                <p className="text-gray-500 mt-2">
+                    System parameters for automatic accruals and limits. 
+                    Calculations below are generated dynamically from the active codebase.
+                </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                {/* Accrual Table */}
+                <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                    <div className="bg-slate-900 text-white p-4 border-b border-gray-200 flex justify-between items-center">
+                        <div className="font-bold flex items-center gap-2"><TrendingUp size={18}/> Accrual Tiers</div>
+                        <div className="text-xs opacity-75 uppercase">Based on Years of Service</div>
+                    </div>
+                    <table className="w-full text-sm text-left">
+                        <thead className="bg-gray-50 text-xs uppercase font-bold text-gray-500">
+                            <tr>
+                                <th className="p-4 border-b">Service Years</th>
+                                <th className="p-4 border-b">Monthly Accrual</th>
+                                <th className="p-4 border-b">Yearly Total</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                            {policyTable.map((tier, idx) => (
+                                <tr key={idx} className="hover:bg-blue-50">
+                                    <td className="p-4 font-bold text-gray-900">
+                                        {tier.years} Years
+                                        {idx === 0 && <span className="ml-2 text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">ENTRY</span>}
+                                    </td>
+                                    <td className="p-4 font-mono text-green-700 font-bold">+{tier.monthly.toFixed(2)} hrs</td>
+                                    <td className="p-4 font-mono text-gray-600">{tier.yearly.toFixed(0)} hrs</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                    <div className="p-4 bg-gray-50 text-xs text-gray-500 border-t border-gray-200">
+                        * Tiers automatically adjust on the employee's anniversary date.
+                    </div>
+                </div>
+
+                {/* Rules & Caps */}
+                <div className="space-y-6">
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                        <h3 className="font-bold text-gray-900 flex items-center gap-2 mb-4"><ShieldCheck className="text-blue-600"/> Caps & Limits</h3>
+                        <div className="space-y-4">
+                            <div className="flex gap-4 items-start">
+                                <div className="mt-1 bg-amber-100 p-1.5 rounded text-amber-600"><AlertTriangle size={16}/></div>
+                                <div>
+                                    <h4 className="font-bold text-gray-800 text-sm">Anniversary Cap</h4>
+                                    <p className="text-xs text-gray-500 mt-1">
+                                        On an employee's anniversary, their total balance (Vacation + Personal) is checked.
+                                        Any hours exceeding the maximum carry-over limit are forfeited.
+                                    </p>
+                                </div>
+                            </div>
+                            <div className="flex gap-4 items-start">
+                                <div className="mt-1 bg-indigo-100 p-1.5 rounded text-indigo-600"><Calendar size={16}/></div>
+                                <div>
+                                    <h4 className="font-bold text-gray-800 text-sm">Monthly Run Cycle</h4>
+                                    <p className="text-xs text-gray-500 mt-1">
+                                        Accruals should be run once per month. The system prevents duplicate runs within the same calendar month.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                         <h3 className="font-bold text-gray-900 flex items-center gap-2 mb-4"><Briefcase className="text-emerald-600"/> Shift Definitions</h3>
+                         <div className="grid grid-cols-2 gap-4">
+                             <div className="p-3 bg-gray-50 rounded border border-gray-200 text-center">
+                                 <div className="text-xs text-gray-400 font-bold uppercase">Standard Shift</div>
+                                 <div className="text-lg font-black text-gray-800">24/48</div>
+                                 <div className="text-[10px] text-gray-500">2920 Hrs / Year</div>
+                             </div>
+                             <div className="p-3 bg-gray-50 rounded border border-gray-200 text-center">
+                                 <div className="text-xs text-gray-400 font-bold uppercase">Day Staff</div>
+                                 <div className="text-lg font-black text-gray-800">40 Hrs</div>
+                                 <div className="text-[10px] text-gray-500">2080 Hrs / Year</div>
+                             </div>
+                         </div>
+                    </div>
+                </div>
+            </div>
+          </div>
       )}
 
       {/* Manual Adjustment Modal */}
