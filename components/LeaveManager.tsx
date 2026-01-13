@@ -627,9 +627,6 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
 
                     <div className="mt-8 pt-4 border-t border-black flex justify-between text-[10px]">
                         <div>
-                            <p className="font-bold mb-6">Employee Signature: ___________________________________</p>
-                        </div>
-                        <div>
                             <p className="font-bold">Chief / Supervisor: ___________________________________</p>
                         </div>
                     </div>
