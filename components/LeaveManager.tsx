@@ -190,18 +190,30 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
       if (!selectedEmp || !budgetStartDate) return [];
       const rows = [];
       const [y, m, d] = budgetStartDate.split('-').map(Number);
-      const startDate = new Date(y, m - 1, d); // Construct date safely
+      const startDate = new Date(y, m - 1, d); 
       
+      const startMonth = selectedEmp.classifications.ft_start_date 
+          ? new Date(selectedEmp.classifications.ft_start_date).getMonth() 
+          : -1;
+      
+      const shiftType = selectedEmp.classifications.shift_schedule || '12';
+      const capAmount = shiftType.includes('10') ? policy.caps.shift_10 : policy.caps.shift_12;
+
       for (let i = 0; i < 12; i++) {
           const currentDate = new Date(startDate);
           currentDate.setMonth(startDate.getMonth() + i);
           
           const stats = calculateMonthlyAccrual(selectedEmp, policy, currentDate);
           
+          // Check for Anniversary Month
+          const isAnniversary = currentDate.getMonth() === startMonth;
+
           rows.push({
               month: currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
               accrual: stats.totalMonthly,
-              tier: stats.tier 
+              tier: stats.tier,
+              isAnniversary,
+              capAmount
           });
       }
       return rows;
@@ -219,7 +231,7 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
       const currentTierStart = policy.tiers.find(t => t.years === Math.floor(currentStats.yearsOfService))?.years || 0;
       const nextTier = [...policy.tiers].sort((a,b) => a.years - b.years).find(t => t.years > currentTierStart);
       
-      // Calculate Next Tier Date
+      // Calculate Next Tier Date & Stats
       let nextTierDateStr = "N/A";
       let nextTierStats = null;
 
@@ -237,6 +249,8 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
              tierName: `${nextTier.years}+ Years`,
              vacDays: nextTier.vacation_days,
              persDays: nextTier.personal_days,
+             vacHrs: nextVacHrs,
+             persHrs: nextPersHrs,
              monthly: nextMonthly
          };
       }
@@ -539,7 +553,9 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
                                 <h4 className="font-bold uppercase border-b border-gray-300 mb-2 pb-1 text-gray-600">Next Tier ({refs.next.tierName})</h4>
                                 <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-gray-600">
                                     <div>Effective:</div><div className="font-mono font-bold text-right text-black">{refs.nextDate}</div>
-                                    <div>New Monthly:</div><div className="font-mono font-bold text-right text-black">{refs.next.monthly.toFixed(2)} hrs</div>
+                                    <div>Vacation:</div><div className="font-mono font-bold text-right text-black">{refs.next.vacDays} days ({refs.next.vacHrs} hrs)</div>
+                                    <div>Personal:</div><div className="font-mono font-bold text-right text-black">{refs.next.persDays} days ({refs.next.persHrs} hrs)</div>
+                                    <div className="border-t border-gray-300 mt-1 pt-1 font-bold">Monthly:</div><div className="border-t border-gray-300 mt-1 pt-1 font-mono font-bold text-right text-black">{refs.next.monthly.toFixed(2)} hrs</div>
                                 </div>
                              </div>
                         ) : (
@@ -558,7 +574,7 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
                                 <th className="border border-black p-1 text-center w-20">Accrued (+)</th>
                                 <th className="border border-black p-1 text-center w-20">Used (-)</th>
                                 <th className="border border-black p-1 text-center w-24">New Bal</th>
-                                <th className="border border-black p-1 text-left">Notes</th>
+                                <th className="border border-black p-1 text-left w-20">Notes</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -574,10 +590,13 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
                             
                             {/* Monthly Rows */}
                             {generateBudgetRows().map((row, idx) => (
-                                <tr key={idx} className="h-8">
-                                    <td className="border border-black p-1 font-medium">
+                                <tr key={idx} className={`h-8 ${row.isAnniversary ? 'bg-amber-50 print:bg-gray-100 font-bold border-b-2 border-black' : ''}`}>
+                                    <td className={`border border-black p-1 ${row.isAnniversary ? 'border-2' : ''}`}>
                                         {row.month}
                                         <div className="text-[9px] text-gray-500 font-normal">{row.tier}</div>
+                                        {row.isAnniversary && (
+                                            <div className="text-[9px] font-bold text-red-600 print:text-black mt-0.5">⚠️ ANNIVERSARY - CHECK CAP (Max {row.capAmount} Hrs)</div>
+                                        )}
                                     </td>
                                     <td className="border border-black p-1"></td>
                                     <td className="border border-black p-1 text-center font-bold text-gray-800">
@@ -592,7 +611,13 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
                     </table>
 
                     <div className="mt-8 pt-4 border-t border-black flex justify-between text-[10px]">
-                </div>
+                        <div>
+                            <p className="font-bold mb-6">Employee Signature: ___________________________________</p>
+                        </div>
+                        <div>
+                            <p className="font-bold">Chief / Supervisor: ___________________________________</p>
+                        </div>
+                    </div>
                 </div>
             ) : (
                 <div className="flex items-center justify-center h-96 text-gray-400 font-bold text-xl uppercase tracking-widest">
