@@ -1,6 +1,6 @@
-import { useState, useRef } from 'react';
-import { Employee, LeaveTransaction, LeavePolicyConfig, DEFAULT_POLICY } from '../types';
-import { calculateMonthlyAccrual, checkAnniversaryCap, formatShiftLabel } from '../services/leaveService';
+import { useState, useMemo } from 'react';
+import { Employee, LeaveTransaction, LeavePolicyConfig, DEFAULT_POLICY, AccrualTier } from '../types';
+import { calculateMonthlyAccrual, checkAnniversaryCap, formatShiftLabel, getShiftHours } from '../services/leaveService';
 import { PlayCircle, ShieldCheck, Briefcase, Calendar, TrendingUp, LayoutGrid, List, Trash2, BookOpen, Settings, Save, X, Cloud, Printer, FileText } from 'lucide-react';
 import { useFeedback } from './FeedbackProvider';
 
@@ -14,12 +14,18 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
   const { notify, confirm } = useFeedback();
   const [selectedEmpId, setSelectedEmpId] = useState<string | null>(null);
   
-  // View Modes: 'list' | 'master' | 'policy' | 'budget'
+  // View Modes
   const [viewMode, setViewMode] = useState<'list' | 'master' | 'policy' | 'budget'>('list');
   const [showAdjustModal, setShowAdjustModal] = useState(false);
   
   // --- BUDGET REPORT STATE ---
-  const [budgetStartYear, setBudgetStartYear] = useState(new Date().getFullYear() - (new Date().getMonth() < 9 ? 1 : 0)); // Defaults to current budget year (e.g. 2024 if Oct 2024)
+  // Default to Oct 1st of current year (or previous year if we are in Jan-Sept)
+  const defaultBudgetStart = () => {
+    const now = new Date();
+    const year = now.getMonth() >= 9 ? now.getFullYear() : now.getFullYear() - 1;
+    return `${year}-10-01`;
+  };
+  const [budgetStartDate, setBudgetStartDate] = useState(defaultBudgetStart());
 
   // --- EDITABLE POLICY STATE ---
   const [policy, setPolicy] = useState<LeavePolicyConfig>(() => {
@@ -181,25 +187,81 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
 
   // Helper for Budget Sheet Generation
   const generateBudgetRows = () => {
-      if (!selectedEmp) return [];
+      if (!selectedEmp || !budgetStartDate) return [];
       const rows = [];
-      const startDate = new Date(budgetStartYear, 9, 1); // Oct 1st
+      const [y, m, d] = budgetStartDate.split('-').map(Number);
+      const startDate = new Date(y, m - 1, d); // Construct date safely
       
       for (let i = 0; i < 12; i++) {
           const currentDate = new Date(startDate);
           currentDate.setMonth(startDate.getMonth() + i);
           
-          // Use our updated service to project accrual for this specific future/past date
           const stats = calculateMonthlyAccrual(selectedEmp, policy, currentDate);
           
           rows.push({
               month: currentDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
               accrual: stats.totalMonthly,
-              tier: stats.tier // Useful to see if tier changed during the year
+              tier: stats.tier 
           });
       }
       return rows;
   };
+
+  // Helper to get Reference Rates (Current vs Next Tier)
+  const getReferenceRates = () => {
+      if (!selectedEmp) return null;
+      
+      // Current Stats
+      const currentStats = calculateMonthlyAccrual(selectedEmp, policy, new Date(budgetStartDate));
+      const hoursPerDay = getShiftHours(selectedEmp);
+      
+      // Find Next Tier
+      const currentTierStart = policy.tiers.find(t => t.years === Math.floor(currentStats.yearsOfService))?.years || 0;
+      const nextTier = [...policy.tiers].sort((a,b) => a.years - b.years).find(t => t.years > currentTierStart);
+      
+      // Calculate Next Tier Date
+      let nextTierDateStr = "N/A";
+      let nextTierStats = null;
+
+      if (nextTier && selectedEmp.classifications.ft_start_date) {
+         const start = new Date(selectedEmp.classifications.ft_start_date);
+         const nextDate = new Date(start);
+         nextDate.setFullYear(start.getFullYear() + nextTier.years);
+         nextTierDateStr = nextDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+         
+         const nextVacHrs = nextTier.vacation_days * hoursPerDay;
+         const nextPersHrs = nextTier.personal_days * hoursPerDay;
+         const nextMonthly = (nextVacHrs + nextPersHrs) / 12;
+
+         nextTierStats = {
+             tierName: `${nextTier.years}+ Years`,
+             vacDays: nextTier.vacation_days,
+             persDays: nextTier.personal_days,
+             monthly: nextMonthly
+         };
+      }
+
+      // Convert Current Days back from hours (reverse calc) or just find tier
+      const curTier = policy.tiers.find(t => `${t.years}+ Years` === currentStats.tier) || policy.tiers[0];
+      const curVacDays = curTier?.vacation_days || 0;
+      const curPersDays = curTier?.personal_days || 0;
+
+      return {
+          current: {
+              tierName: currentStats.tier,
+              vacDays: curVacDays,
+              persDays: curPersDays,
+              vacHrs: curVacDays * hoursPerDay,
+              persHrs: curPersDays * hoursPerDay,
+              monthly: currentStats.totalMonthly
+          },
+          next: nextTierStats,
+          nextDate: nextTierDateStr,
+          shift: formatShiftLabel(selectedEmp.classifications.shift_schedule)
+      };
+  };
+
+  const refs = getReferenceRates();
 
   return (
     <div className="h-full flex flex-col bg-gray-50">
@@ -322,6 +384,7 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
                          </thead>
                          <tbody className="divide-y divide-gray-100">
                             {(selectedEmp.leave_bank?.history || []).map((tx: any) => {
+                               const change = tx.amount_vacation + tx.amount_personal;
                                return (
                                    <tr key={tx.id} className="hover:bg-gray-50 transition-colors group">
                                       <td className="p-4 text-gray-600 whitespace-nowrap">{tx.date}</td>
@@ -424,13 +487,13 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
                         </select>
                     </div>
                     <div>
-                        <label className="text-xs font-bold text-gray-500 uppercase block mb-1">Budget Year Start</label>
-                        <select className="w-full p-2 border rounded text-sm" value={budgetStartYear} onChange={e => setBudgetStartYear(parseInt(e.target.value))}>
-                            {[...Array(5)].map((_, i) => {
-                                const y = new Date().getFullYear() - 2 + i;
-                                return <option key={y} value={y}>Oct {y} - Sept {y+1}</option>
-                            })}
-                        </select>
+                        <label className="text-xs font-bold text-gray-500 uppercase block mb-1">Start Date</label>
+                        <input 
+                            type="date"
+                            className="w-full p-2 border rounded text-sm" 
+                            value={budgetStartDate} 
+                            onChange={e => setBudgetStartDate(e.target.value)}
+                        />
                     </div>
                     <button onClick={handlePrint} className="w-full py-2 bg-slate-900 text-white font-bold rounded hover:bg-slate-800 flex items-center justify-center gap-2">
                         <Printer size={16}/> Print Sheet
@@ -439,17 +502,20 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
             </div>
 
             {/* The Physical Paper Sheet */}
-            {selectedEmp ? (
-                <div className="bg-white shadow-lg print:shadow-none w-[8.5in] min-h-[11in] p-12 print:p-0 print:w-full mx-auto text-black">
-                    <div className="text-center border-b-2 border-black pb-4 mb-6">
-                        <h1 className="text-2xl font-black uppercase tracking-wider">Leave Tracking Sheet</h1>
-                        <p className="text-sm font-bold mt-1">Budget Year: Oct 1, {budgetStartYear} — Sept 30, {budgetStartYear + 1}</p>
+            {selectedEmp && refs ? (
+                <div className="bg-white shadow-lg print:shadow-none w-[8.5in] p-6 print:p-4 mx-auto text-black print:text-xs">
+                    
+                    {/* Header */}
+                    <div className="text-center border-b-2 border-black pb-2 mb-4">
+                        <h1 className="text-xl font-black uppercase tracking-wider">Leave Tracking Sheet</h1>
+                        <p className="text-xs font-bold mt-1">Budget Period Beginning: {new Date(budgetStartDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
                     </div>
 
-                    <div className="flex justify-between mb-8 text-sm">
+                    {/* Info Block */}
+                    <div className="flex justify-between mb-4 text-xs border-b border-gray-300 pb-2">
                         <div className="space-y-1">
                             <p><span className="font-bold">Employee:</span> {selectedEmp.personal.full_name}</p>
-                            <p><span className="font-bold">Classification:</span> {selectedEmp.classifications.pay_level} / {formatShiftLabel(selectedEmp.classifications.shift_schedule)}</p>
+                            <p><span className="font-bold">Classification:</span> {selectedEmp.classifications.pay_level} / {refs.shift}</p>
                         </div>
                         <div className="space-y-1 text-right">
                             <p><span className="font-bold">Start Date:</span> {selectedEmp.classifications.ft_start_date}</p>
@@ -457,52 +523,76 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
                         </div>
                     </div>
 
-                    <table className="w-full border-collapse border border-black text-sm">
+                    {/* REFERENCE RATES (New Section) */}
+                    <div className="mb-6 grid grid-cols-2 gap-4 text-xs">
+                        <div className="border border-black p-2">
+                            <h4 className="font-bold uppercase border-b border-gray-300 mb-2 pb-1">Current Rate ({refs.current.tierName})</h4>
+                            <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                                <div>Vacation:</div><div className="font-mono font-bold text-right">{refs.current.vacDays} days ({refs.current.vacHrs} hrs)</div>
+                                <div>Personal:</div><div className="font-mono font-bold text-right">{refs.current.persDays} days ({refs.current.persHrs} hrs)</div>
+                                <div className="border-t border-gray-200 mt-1 pt-1 font-bold">Monthly:</div><div className="border-t border-gray-200 mt-1 pt-1 font-mono font-black text-right">{refs.current.monthly.toFixed(2)} hrs</div>
+                            </div>
+                        </div>
+                        
+                        {refs.next ? (
+                             <div className="border border-black p-2 bg-gray-50">
+                                <h4 className="font-bold uppercase border-b border-gray-300 mb-2 pb-1 text-gray-600">Next Tier ({refs.next.tierName})</h4>
+                                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-gray-600">
+                                    <div>Effective:</div><div className="font-mono font-bold text-right text-black">{refs.nextDate}</div>
+                                    <div>New Monthly:</div><div className="font-mono font-bold text-right text-black">{refs.next.monthly.toFixed(2)} hrs</div>
+                                </div>
+                             </div>
+                        ) : (
+                            <div className="border border-gray-200 p-2 flex items-center justify-center text-gray-400 italic">
+                                Max Tier Reached
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Table */}
+                    <table className="w-full border-collapse border border-black text-xs">
                         <thead>
                             <tr className="bg-gray-100 print:bg-gray-200">
-                                <th className="border border-black p-2 text-left w-1/4">Month</th>
-                                <th className="border border-black p-2 text-center w-32">Balance Forward</th>
-                                <th className="border border-black p-2 text-center w-24">Accrued (+)</th>
-                                <th className="border border-black p-2 text-center w-24">Used (-)</th>
-                                <th className="border border-black p-2 text-center w-32">New Balance</th>
+                                <th className="border border-black p-1 text-left w-1/4">Month</th>
+                                <th className="border border-black p-1 text-center w-24">Prev Bal</th>
+                                <th className="border border-black p-1 text-center w-20">Accrued (+)</th>
+                                <th className="border border-black p-1 text-center w-20">Used (-)</th>
+                                <th className="border border-black p-1 text-center w-24">New Bal</th>
+                                <th className="border border-black p-1 text-left">Notes</th>
                             </tr>
                         </thead>
                         <tbody>
                             {/* Carry Over Row */}
                             <tr>
-                                <td className="border border-black p-2 font-bold bg-gray-50">STARTING BALANCE</td>
-                                <td className="border border-black p-2 text-center font-bold text-gray-400 italic">---</td>
-                                <td className="border border-black p-2"></td>
-                                <td className="border border-black p-2"></td>
-                                <td className="border border-black p-2"></td>
+                                <td className="border border-black p-1 font-bold bg-gray-50">STARTING BALANCE</td>
+                                <td className="border border-black p-1 text-center font-bold text-gray-400 italic">---</td>
+                                <td className="border border-black p-1"></td>
+                                <td className="border border-black p-1"></td>
+                                <td className="border border-black p-1"></td>
+                                <td className="border border-black p-1"></td>
                             </tr>
                             
                             {/* Monthly Rows */}
                             {generateBudgetRows().map((row, idx) => (
-                                <tr key={idx} className="h-12">
-                                    <td className="border border-black p-2 font-medium">
+                                <tr key={idx} className="h-8">
+                                    <td className="border border-black p-1 font-medium">
                                         {row.month}
-                                        <div className="text-[10px] text-gray-500 font-normal">{row.tier}</div>
+                                        <div className="text-[9px] text-gray-500 font-normal">{row.tier}</div>
                                     </td>
-                                    <td className="border border-black p-2"></td>
-                                    <td className="border border-black p-2 text-center font-bold text-gray-800">
+                                    <td className="border border-black p-1"></td>
+                                    <td className="border border-black p-1 text-center font-bold text-gray-800">
                                         {row.accrual.toFixed(2)}
                                     </td>
-                                    <td className="border border-black p-2"></td>
-                                    <td className="border border-black p-2"></td>
+                                    <td className="border border-black p-1"></td>
+                                    <td className="border border-black p-1"></td>
+                                    <td className="border border-black p-1"></td>
                                 </tr>
                             ))}
                         </tbody>
                     </table>
 
-                    <div className="mt-12 pt-8 border-t border-black flex justify-between text-xs">
-                        <div>
-                            <p className="font-bold mb-8">Employee Signature: ___________________________________</p>
-                        </div>
-                        <div>
-                            <p className="font-bold">Chief / Supervisor: ___________________________________</p>
-                        </div>
-                    </div>
+                    <div className="mt-8 pt-4 border-t border-black flex justify-between text-[10px]">
+                </div>
                 </div>
             ) : (
                 <div className="flex items-center justify-center h-96 text-gray-400 font-bold text-xl uppercase tracking-widest">
@@ -513,12 +603,13 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
             {/* Print Styles Injection */}
             <style>{`
                 @media print {
-                    @page { margin: 0.5in; size: portrait; }
+                    @page { margin: 0.25in; size: portrait; }
                     body { background: white; -webkit-print-color-adjust: exact; }
                     .print\\:hidden { display: none !important; }
                     .print\\:w-full { width: 100% !important; }
-                    .print\\:shadow-none { shadow: none !important; }
-                    /* Hide Sidebar and other layout elements if possible, usually fixed full screen covers it */
+                    .print\\:shadow-none { box-shadow: none !important; }
+                    .print\\:text-xs { font-size: 10px !important; }
+                    .print\\:p-4 { padding: 1rem !important; }
                     nav, header, aside { display: none !important; }
                     .overflow-auto { overflow: visible !important; }
                 }
