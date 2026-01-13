@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react';
-import { Employee, LeaveTransaction, LeavePolicyConfig, DEFAULT_POLICY, AccrualTier } from '../types';
+import { useState } from 'react';
+import { Employee, LeaveTransaction, LeavePolicyConfig, DEFAULT_POLICY } from '../types';
 import { calculateMonthlyAccrual, checkAnniversaryCap, formatShiftLabel, getShiftHours } from '../services/leaveService';
 import { PlayCircle, ShieldCheck, Briefcase, Calendar, TrendingUp, LayoutGrid, List, Trash2, BookOpen, Settings, Save, X, Cloud, Printer, FileText, Users } from 'lucide-react';
 import { useFeedback } from './FeedbackProvider';
@@ -22,7 +22,6 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
   const [isBatchMode, setIsBatchMode] = useState(false);
    
   // --- BUDGET REPORT STATE ---
-  // Default to Oct 1st of current year (or previous year if we are in Jan-Sept)
   const defaultBudgetStart = () => {
     const now = new Date();
     const year = now.getMonth() >= 9 ? now.getFullYear() : now.getFullYear() - 1;
@@ -195,8 +194,6 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
     notify('success', 'Entry deleted.');
   };
 
-  // --- REFACTORED HELPERS FOR BUDGET SHEET ---
-  // Now accept 'emp' as argument instead of relying on state
   const generateBudgetRows = (emp: Employee) => {
       if (!emp || !budgetStartDate) return [];
       const rows = [];
@@ -291,16 +288,16 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
      if (!refs) return null;
 
      return (
-        <div className="bg-white shadow-lg print:shadow-none w-[8.5in] p-6 print:p-4 mx-auto text-black print:text-xs mb-8 print:mb-0 page-break-after">
+        <div className="bg-white shadow-lg print:shadow-none w-[8.5in] p-6 print:p-0 mx-auto text-black print:text-[10px] mb-8 print:mb-0 page-break-after print:border-none print:w-full">
             
             {/* Header */}
-            <div className="text-center border-b-2 border-black pb-2 mb-4">
-                <h1 className="text-xl font-black uppercase tracking-wider">Leave Tracking Sheet</h1>
+            <div className="text-center border-b-2 border-black pb-2 mb-4 print:mb-2 print:pb-1">
+                <h1 className="text-xl font-black uppercase tracking-wider print:text-lg">Leave Tracking Sheet</h1>
                 <p className="text-xs font-bold mt-1">Budget Period Beginning: {getLocalDate(budgetStartDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
             </div>
 
             {/* Info Block */}
-            <div className="flex justify-between mb-4 text-xs border-b border-gray-300 pb-2">
+            <div className="flex justify-between mb-4 print:mb-2 text-xs border-b border-gray-300 pb-2 print:pb-1">
                 <div className="space-y-1">
                     <p><span className="font-bold">Employee:</span> {emp.personal.full_name}</p>
                     <p><span className="font-bold">Classification:</span> {emp.classifications.pay_level} / {refs.shift}</p>
@@ -312,7 +309,7 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
             </div>
 
             {/* REFERENCE RATES */}
-            <div className="mb-6 grid grid-cols-2 gap-4 text-xs">
+            <div className="mb-6 print:mb-4 grid grid-cols-2 gap-4 text-xs">
                 <div className="border border-black p-2">
                     <h4 className="font-bold uppercase border-b border-gray-300 mb-2 pb-1">Current Rate ({refs.current.label})</h4>
                     <div className="grid grid-cols-2 gap-x-4 gap-y-1">
@@ -328,7 +325,7 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
                     </div>
                 </div>
                 
-                <div className="border border-black p-2 bg-gray-50">
+                <div className="border border-black p-2 bg-gray-50 print:bg-gray-50">
                     <h4 className="font-bold uppercase border-b border-gray-300 mb-2 pb-1 text-gray-600">Renewal / Next Year ({refs.next.label})</h4>
                     <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-gray-600">
                         <div>Effective:</div><div className="font-mono font-bold text-right text-black">{refs.nextDate}</div>
@@ -346,7 +343,7 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
             </div>
 
             {/* Table */}
-            <table className="w-full border-collapse border border-black text-xs">
+            <table className="w-full border-collapse border border-black text-xs print:text-[10px]">
                 <thead>
                     <tr className="bg-gray-100 print:bg-gray-200">
                         <th className="border border-black p-1 text-left w-1/4">Month</th>
@@ -358,8 +355,8 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
                     </tr>
                 </thead>
                 <tbody>
-                    <tr>
-                        <td className="border border-black p-1 font-bold bg-gray-50">STARTING BALANCE</td>
+                    <tr className="h-8 print:h-6">
+                        <td className="border border-black p-1 font-bold bg-gray-50 print:bg-gray-50">STARTING BALANCE</td>
                         <td className="border border-black p-1 text-center font-bold text-gray-400 italic">---</td>
                         <td className="border border-black p-1"></td>
                         <td className="border border-black p-1"></td>
@@ -368,7 +365,7 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
                     </tr>
                     
                     {rows.map((row, idx) => (
-                        <tr key={idx} className={`h-8 ${row.isAnniversary ? 'bg-amber-50 font-bold border-b-2 border-black' : ''}`}>
+                        <tr key={idx} className={`h-8 print:h-6 ${row.isAnniversary ? 'bg-amber-50 font-bold border-b-2 border-black' : ''}`}>
                             <td className={`border border-black p-1 ${row.isAnniversary ? 'border-2' : ''}`}>
                                 {row.month}
                                 <div className="text-[9px] text-gray-500 font-normal">{row.tier}</div>
@@ -388,7 +385,7 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
                 </tbody>
             </table>
 
-            <div className="mt-8 pt-4 border-t border-black flex justify-between text-[10px]">
+            <div className="mt-8 pt-4 print:mt-4 border-t border-black flex justify-between text-[10px]">
                 <div>
                     <p className="font-bold">Chief / Supervisor: ___________________________________</p>
                 </div>
@@ -669,7 +666,7 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
             </div>
 
             {/* The Sheet Display Area */}
-            <div className="flex-1 bg-gray-100 overflow-auto p-8 flex flex-col items-center">
+            <div id="budget-print-container" className="flex-1 bg-gray-100 overflow-auto p-8 flex flex-col items-center">
                 
                 {/* Single Mode */}
                 {!isBatchMode && selectedEmp && (
@@ -693,16 +690,41 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
             <style>{`
                 @media print {
                     @page { margin: 0.25in; size: portrait; }
-                    body { background: white; -webkit-print-color-adjust: exact; }
-                    .print\\:hidden { display: none !important; }
-                    .print\\:w-full { width: 100% !important; }
-                    .print\\:shadow-none { box-shadow: none !important; }
-                    .print\\:text-xs { font-size: 10px !important; }
-                    .print\\:p-4 { padding: 1rem !important; }
-                    .print\\:mb-0 { margin-bottom: 0 !important; }
+                    
+                    /* Global Reset */
+                    html, body, #root, .app-container {
+                        width: 100% !important;
+                        height: auto !important;
+                        overflow: visible !important;
+                        margin: 0 !important;
+                        padding: 0 !important;
+                        background: white !important;
+                    }
+                    
+                    /* Hide non-printable elements */
+                    nav, header, aside, .print\\:hidden { display: none !important; }
+
+                    /* Target the specific print container and force it to flow */
+                    #budget-print-container {
+                        display: block !important;
+                        position: absolute !important;
+                        top: 0 !important;
+                        left: 0 !important;
+                        width: 100% !important;
+                        height: auto !important;
+                        margin: 0 !important;
+                        padding: 0 !important;
+                        overflow: visible !important;
+                        background: white !important;
+                        z-index: 9999;
+                    }
+
+                    /* Ensure background colors print */
+                    * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+                    
+                    /* Force page breaks */
                     .page-break-after { page-break-after: always; break-after: page; }
-                    nav, header, aside { display: none !important; }
-                    .overflow-auto { overflow: visible !important; }
+                    .page-break-after:last-child { page-break-after: auto; }
                 }
             `}</style>
         </div>
