@@ -42,6 +42,15 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
   const ftStaff = employees.filter(e => e.classifications.employment_type === 'Full Time');
   const selectedEmp = employees.find(e => e.id === selectedEmpId);
 
+  // --- HELPER: TIMEZONE FIXER ---
+  // Safely parses "YYYY-MM-DD" into a Local Date object (preventing the "previous day" shift)
+  const getLocalDate = (dateStr: string) => {
+      if (!dateStr) return new Date();
+      const parts = dateStr.split('-');
+      // Note: Month is 0-indexed in JS Date constructor (0=Jan, 1=Feb, etc.)
+      return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+  };
+
   // --- ACTIONS ---
 
   const handleSavePolicy = () => {
@@ -189,11 +198,11 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
   const generateBudgetRows = () => {
       if (!selectedEmp || !budgetStartDate) return [];
       const rows = [];
-      const [y, m, d] = budgetStartDate.split('-').map(Number);
-      const startDate = new Date(y, m - 1, d); 
+      const startDate = getLocalDate(budgetStartDate);
       
+      // Fix: Parse Start Date manually so Anniversary falls on correct Month
       const startMonth = selectedEmp.classifications.ft_start_date 
-          ? new Date(selectedEmp.classifications.ft_start_date).getMonth() 
+          ? getLocalDate(selectedEmp.classifications.ft_start_date).getMonth() 
           : -1;
       
       const shiftType = selectedEmp.classifications.shift_schedule || '12';
@@ -203,6 +212,8 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
           const currentDate = new Date(startDate);
           currentDate.setMonth(startDate.getMonth() + i);
           
+          // Use string parsing fix for monthly accrual calculation dates too if needed
+          // (assuming calculateMonthlyAccrual handles Date objects correctly)
           const stats = calculateMonthlyAccrual(selectedEmp, policy, currentDate);
           
           // Check for Anniversary Month
@@ -224,7 +235,7 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
       if (!selectedEmp) return null;
       
       // Current Stats
-      const currentStats = calculateMonthlyAccrual(selectedEmp, policy, new Date(budgetStartDate));
+      const currentStats = calculateMonthlyAccrual(selectedEmp, policy, getLocalDate(budgetStartDate));
       const hoursPerDay = getShiftHours(selectedEmp);
       
       // Find Next Tier
@@ -236,9 +247,12 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
       let nextTierStats = null;
 
       if (nextTier && selectedEmp.classifications.ft_start_date) {
-         const start = new Date(selectedEmp.classifications.ft_start_date);
+         // Fix: Use getLocalDate so we start with the correct day (e.g. Aug 1st not Jul 31st)
+         const start = getLocalDate(selectedEmp.classifications.ft_start_date);
          const nextDate = new Date(start);
          nextDate.setFullYear(start.getFullYear() + nextTier.years);
+         
+         // Format manually or ensure locale doesn't shift timezone
          nextTierDateStr = nextDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
          
          const nextVacHrs = nextTier.vacation_days * hoursPerDay;
@@ -522,7 +536,8 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
                     {/* Header */}
                     <div className="text-center border-b-2 border-black pb-2 mb-4">
                         <h1 className="text-xl font-black uppercase tracking-wider">Leave Tracking Sheet</h1>
-                        <p className="text-xs font-bold mt-1">Budget Period Beginning: {new Date(budgetStartDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
+                        {/* Fix: Use getLocalDate to ensure header date matches input exactly */}
+                        <p className="text-xs font-bold mt-1">Budget Period Beginning: {getLocalDate(budgetStartDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
                     </div>
 
                     {/* Info Block */}
