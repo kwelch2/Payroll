@@ -633,7 +633,7 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
                                         {row.month}
                                         <div className="text-[9px] text-gray-500 font-normal">{row.tier}</div>
                                         {row.isAnniversary && (
-                                            <div className="text-[9px] font-bold text-red-600 print:text-black mt-0.5">⚠️ ANNIVERSARY - CHECK CAP (Max {row.capAmount} Hrs)</div>
+                                            <div className="text-[8px] font-bold text-red-600 print:text-black mt-0.5">⚠️ ANNIVERSARY CAP (Max {row.capAmount} Hrs)</div>
                                         )}
                                     </td>
                                     <td className="border border-black p-1"></td>
