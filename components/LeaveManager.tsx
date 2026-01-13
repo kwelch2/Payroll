@@ -288,7 +288,7 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
      if (!refs) return null;
 
      return (
-        <div className="bg-white shadow-lg print:shadow-none w-[8.5in] p-6 print:p-0 mx-auto text-black print:text-[10px] mb-8 print:mb-0 page-break-after print:border-none print:w-full">
+        <div className="bg-white shadow-lg print:shadow-none w-[8.5in] p-6 print:p-0 mx-auto text-black print:text-[16px] mb-8 print:mb-0 page-break-after print:border-none print:w-full">
             
             {/* Header */}
             <div className="text-center border-b-2 border-black pb-2 mb-4 print:mb-2 print:pb-1">
