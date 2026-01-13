@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { Employee, LeaveTransaction, LeavePolicyConfig, DEFAULT_POLICY, AccrualTier } from '../types';
 import { calculateMonthlyAccrual, checkAnniversaryCap, formatShiftLabel, getShiftHours } from '../services/leaveService';
-import { PlayCircle, ShieldCheck, Briefcase, Calendar, TrendingUp, LayoutGrid, List, Trash2, BookOpen, Settings, Save, X, Cloud, Printer, FileText } from 'lucide-react';
+import { PlayCircle, ShieldCheck, Briefcase, Calendar, TrendingUp, LayoutGrid, List, Trash2, BookOpen, Settings, Save, X, Cloud, Printer, FileText, Users } from 'lucide-react';
 import { useFeedback } from './FeedbackProvider';
 
 interface LeaveManagerProps {
@@ -17,6 +17,9 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
   // View Modes
   const [viewMode, setViewMode] = useState<'list' | 'master' | 'policy' | 'budget'>('list');
   const [showAdjustModal, setShowAdjustModal] = useState(false);
+  
+  // Batch Print Mode State
+  const [isBatchMode, setIsBatchMode] = useState(false);
    
   // --- BUDGET REPORT STATE ---
   // Default to Oct 1st of current year (or previous year if we are in Jan-Sept)
@@ -43,11 +46,9 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
   const selectedEmp = employees.find(e => e.id === selectedEmpId);
 
   // --- HELPER: TIMEZONE FIXER ---
-  // Safely parses "YYYY-MM-DD" into a Local Date object (preventing the "previous day" shift)
   const getLocalDate = (dateStr: string) => {
       if (!dateStr) return new Date();
       const parts = dateStr.split('-');
-      // Note: Month is 0-indexed in JS Date constructor (0=Jan, 1=Feb, etc.)
       return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
   };
 
@@ -194,29 +195,25 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
     notify('success', 'Entry deleted.');
   };
 
-  // Helper for Budget Sheet Generation
-  const generateBudgetRows = () => {
-      if (!selectedEmp || !budgetStartDate) return [];
+  // --- REFACTORED HELPERS FOR BUDGET SHEET ---
+  // Now accept 'emp' as argument instead of relying on state
+  const generateBudgetRows = (emp: Employee) => {
+      if (!emp || !budgetStartDate) return [];
       const rows = [];
       const startDate = getLocalDate(budgetStartDate);
       
-      // Fix: Parse Start Date manually so Anniversary falls on correct Month
-      const startMonth = selectedEmp.classifications.ft_start_date 
-          ? getLocalDate(selectedEmp.classifications.ft_start_date).getMonth() 
+      const startMonth = emp.classifications.ft_start_date 
+          ? getLocalDate(emp.classifications.ft_start_date).getMonth() 
           : -1;
       
-      const shiftType = selectedEmp.classifications.shift_schedule || '12';
+      const shiftType = emp.classifications.shift_schedule || '12';
       const capAmount = shiftType.includes('10') ? policy.caps.shift_10 : policy.caps.shift_12;
 
       for (let i = 0; i < 12; i++) {
           const currentDate = new Date(startDate);
           currentDate.setMonth(startDate.getMonth() + i);
           
-          // Use string parsing fix for monthly accrual calculation dates too if needed
-          // (assuming calculateMonthlyAccrual handles Date objects correctly)
-          const stats = calculateMonthlyAccrual(selectedEmp, policy, currentDate);
-          
-          // Check for Anniversary Month
+          const stats = calculateMonthlyAccrual(emp, policy, currentDate);
           const isAnniversary = currentDate.getMonth() === startMonth;
 
           rows.push({
@@ -230,17 +227,11 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
       return rows;
   };
 
-  // Helper to get Reference Rates (Current vs Renewal/Next Year)
-  const getReferenceRates = () => {
-      if (!selectedEmp) return null;
+  const getReferenceRates = (emp: Employee) => {
+      if (!emp) return null;
       
-      // Current Stats at the start of budget period
-      const currentStats = calculateMonthlyAccrual(selectedEmp, policy, getLocalDate(budgetStartDate));
-      const hoursPerDay = getShiftHours(selectedEmp);
-      
-      // -- CURRENT YEAR STATS --
-      // We look up the tier manually to ensure we have the raw days, 
-      // though currentStats has most of this, having the days separated is useful.
+      const currentStats = calculateMonthlyAccrual(emp, policy, getLocalDate(budgetStartDate));
+      const hoursPerDay = getShiftHours(emp);
       const currentYearsInt = Math.floor(currentStats.yearsOfService);
       
       const currentTier = [...policy.tiers]
@@ -250,29 +241,19 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
       const curVacDays = currentTier.vacation_days;
       const curPersDays = currentTier.personal_days;
 
-      // -- NEXT YEAR (RENEWAL) STATS --
-      // Calculate based on the upcoming year of service (Current + 1)
       const nextYearInt = currentYearsInt + 1;
-      
-      // Find Tier applicable for Next Year
-      // (Find largest year threshold <= nextYearInt)
       const nextYearTier = [...policy.tiers]
           .sort((a,b) => b.years - a.years)
           .find(t => nextYearInt >= t.years) || policy.tiers[0];
 
-      // Calculate Next Anniversary Date
       let nextYearDateStr = "N/A";
-      if (selectedEmp.classifications.ft_start_date) {
-         const start = getLocalDate(selectedEmp.classifications.ft_start_date);
+      if (emp.classifications.ft_start_date) {
+         const start = getLocalDate(emp.classifications.ft_start_date);
          const nextDate = new Date(start);
-         // Add years to reach the NEXT anniversary relative to budget start
-         // (Simply: Start Date + (Current Years + 1))
          nextDate.setFullYear(start.getFullYear() + nextYearInt);
-         
          nextYearDateStr = nextDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
       }
       
-      // Calculate Next Year's Hours
       const nextVacHrs = nextYearTier.vacation_days * hoursPerDay;
       const nextPersHrs = nextYearTier.personal_days * hoursPerDay;
       const nextMonthly = (nextVacHrs + nextPersHrs) / 12;
@@ -299,11 +280,122 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
               monthly: nextMonthly
           },
           nextDate: nextYearDateStr,
-          shift: formatShiftLabel(selectedEmp.classifications.shift_schedule)
+          shift: formatShiftLabel(emp.classifications.shift_schedule)
       };
   };
 
-  const refs = getReferenceRates();
+  // --- SUB-COMPONENT: BUDGET SHEET ---
+  const BudgetSheet = ({ emp }: { emp: Employee }) => {
+     const refs = getReferenceRates(emp);
+     const rows = generateBudgetRows(emp);
+     if (!refs) return null;
+
+     return (
+        <div className="bg-white shadow-lg print:shadow-none w-[8.5in] p-6 print:p-4 mx-auto text-black print:text-xs mb-8 print:mb-0 page-break-after">
+            
+            {/* Header */}
+            <div className="text-center border-b-2 border-black pb-2 mb-4">
+                <h1 className="text-xl font-black uppercase tracking-wider">Leave Tracking Sheet</h1>
+                <p className="text-xs font-bold mt-1">Budget Period Beginning: {getLocalDate(budgetStartDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
+            </div>
+
+            {/* Info Block */}
+            <div className="flex justify-between mb-4 text-xs border-b border-gray-300 pb-2">
+                <div className="space-y-1">
+                    <p><span className="font-bold">Employee:</span> {emp.personal.full_name}</p>
+                    <p><span className="font-bold">Classification:</span> {emp.classifications.pay_level} / {refs.shift}</p>
+                </div>
+                <div className="space-y-1 text-right">
+                    <p><span className="font-bold">Start Date:</span> {emp.classifications.ft_start_date}</p>
+                    <p><span className="font-bold">ID:</span> {emp.employee_id || '---'}</p>
+                </div>
+            </div>
+
+            {/* REFERENCE RATES */}
+            <div className="mb-6 grid grid-cols-2 gap-4 text-xs">
+                <div className="border border-black p-2">
+                    <h4 className="font-bold uppercase border-b border-gray-300 mb-2 pb-1">Current Rate ({refs.current.label})</h4>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                        <div>Vacation:</div><div className="font-mono font-bold text-right">{refs.current.vacDays} days ({refs.current.vacHrs} hrs)</div>
+                        <div>Personal:</div><div className="font-mono font-bold text-right">{refs.current.persDays} days ({refs.current.persHrs} hrs)</div>
+                        
+                        <div className="font-bold text-gray-700">Total:</div>
+                        <div className="font-mono font-bold text-right text-gray-700">
+                            {refs.current.totalDays} days ({refs.current.totalHrs} hrs)
+                        </div>
+
+                        <div className="border-t border-gray-200 mt-1 pt-1 font-bold">Monthly:</div><div className="border-t border-gray-200 mt-1 pt-1 font-mono font-black text-right">{refs.current.monthly.toFixed(2)} hrs</div>
+                    </div>
+                </div>
+                
+                <div className="border border-black p-2 bg-gray-50">
+                    <h4 className="font-bold uppercase border-b border-gray-300 mb-2 pb-1 text-gray-600">Renewal / Next Year ({refs.next.label})</h4>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-gray-600">
+                        <div>Effective:</div><div className="font-mono font-bold text-right text-black">{refs.nextDate}</div>
+                        <div>Vacation:</div><div className="font-mono font-bold text-right text-black">{refs.next.vacDays} days ({refs.next.vacHrs} hrs)</div>
+                        <div>Personal:</div><div className="font-mono font-bold text-right text-black">{refs.next.persDays} days ({refs.next.persHrs} hrs)</div>
+                        
+                        <div className="font-bold text-gray-500">Total:</div>
+                        <div className="font-mono font-bold text-right text-black">
+                            {refs.next.totalDays} days ({refs.next.totalHrs} hrs)
+                        </div>
+
+                        <div className="border-t border-gray-300 mt-1 pt-1 font-bold">Monthly:</div><div className="border-t border-gray-300 mt-1 pt-1 font-mono font-bold text-right text-black">{refs.next.monthly.toFixed(2)} hrs</div>
+                    </div>
+                 </div>
+            </div>
+
+            {/* Table */}
+            <table className="w-full border-collapse border border-black text-xs">
+                <thead>
+                    <tr className="bg-gray-100 print:bg-gray-200">
+                        <th className="border border-black p-1 text-left w-1/4">Month</th>
+                        <th className="border border-black p-1 text-center w-24">Prev Bal</th>
+                        <th className="border border-black p-1 text-center w-20">Accrued (+)</th>
+                        <th className="border border-black p-1 text-center w-20">Used (-)</th>
+                        <th className="border border-black p-1 text-center w-24">New Bal</th>
+                        <th className="border border-black p-1 text-left w-20">Notes</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td className="border border-black p-1 font-bold bg-gray-50">STARTING BALANCE</td>
+                        <td className="border border-black p-1 text-center font-bold text-gray-400 italic">---</td>
+                        <td className="border border-black p-1"></td>
+                        <td className="border border-black p-1"></td>
+                        <td className="border border-black p-1"></td>
+                        <td className="border border-black p-1"></td>
+                    </tr>
+                    
+                    {rows.map((row, idx) => (
+                        <tr key={idx} className={`h-8 ${row.isAnniversary ? 'bg-amber-50 font-bold border-b-2 border-black' : ''}`}>
+                            <td className={`border border-black p-1 ${row.isAnniversary ? 'border-2' : ''}`}>
+                                {row.month}
+                                <div className="text-[9px] text-gray-500 font-normal">{row.tier}</div>
+                                {row.isAnniversary && (
+                                    <div className="text-[8px] font-bold text-red-600 mt-0.5">⚠️ ANNIVERSARY CAP (Max {row.capAmount} Hrs)</div>
+                                )}
+                            </td>
+                            <td className="border border-black p-1"></td>
+                            <td className="border border-black p-1 text-center font-bold text-gray-800">
+                                {row.accrual.toFixed(2)}
+                            </td>
+                            <td className="border border-black p-1"></td>
+                            <td className="border border-black p-1"></td>
+                            <td className="border border-black p-1"></td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+
+            <div className="mt-8 pt-4 border-t border-black flex justify-between text-[10px]">
+                <div>
+                    <p className="font-bold">Chief / Supervisor: ___________________________________</p>
+                </div>
+            </div>
+        </div>
+     );
+  };
 
   return (
     <div className="h-full flex flex-col bg-gray-50">
@@ -514,22 +606,19 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
         </div>
       )}
 
-      {/* VIEW: BUDGET SHEET (PRINTABLE) */}
+      {/* VIEW: BUDGET SHEET (PRINTABLE) - REFACTORED LAYOUT */}
       {viewMode === 'budget' && (
-        <div className="flex-1 bg-gray-100 p-8 overflow-auto flex justify-center">
-            {/* Control Panel - Hidden on Print */}
-            <div className="fixed top-24 right-8 bg-white p-4 rounded-xl shadow-xl border border-gray-200 w-64 print:hidden z-50">
-                <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2"><Settings size={16}/> Report Settings</h3>
-                <div className="space-y-3">
+        <div className="flex-1 flex overflow-hidden">
+            {/* Sidebar Controls (Hidden on Print) */}
+            <div className="w-80 bg-white border-r border-gray-200 p-6 flex flex-col gap-6 print:hidden overflow-y-auto">
+                <div>
+                   <h3 className="font-bold text-gray-900 mb-1 flex items-center gap-2"><Settings size={18}/> Report Settings</h3>
+                   <p className="text-xs text-gray-500">Configure the output for printing</p>
+                </div>
+
+                <div className="space-y-4">
                     <div>
-                        <label className="text-xs font-bold text-gray-500 uppercase block mb-1">Employee</label>
-                        <select className="w-full p-2 border rounded text-sm" value={selectedEmpId || ''} onChange={e => setSelectedEmpId(e.target.value)}>
-                            <option value="">Select Employee...</option>
-                            {ftStaff.map(e => <option key={e.id} value={e.id}>{e.personal.full_name}</option>)}
-                        </select>
-                    </div>
-                    <div>
-                        <label className="text-xs font-bold text-gray-500 uppercase block mb-1">Start Date</label>
+                        <label className="text-xs font-bold text-gray-500 uppercase block mb-1">Budget Start Date</label>
                         <input 
                             type="date"
                             className="w-full p-2 border rounded text-sm" 
@@ -537,128 +626,68 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
                             onChange={e => setBudgetStartDate(e.target.value)}
                         />
                     </div>
-                    <button onClick={handlePrint} className="w-full py-2 bg-slate-900 text-white font-bold rounded hover:bg-slate-800 flex items-center justify-center gap-2">
-                        <Printer size={16}/> Print Sheet
+                    
+                    <div className="border-t border-gray-100 pt-4">
+                        <label className="text-xs font-bold text-gray-500 uppercase block mb-2">Print Mode</label>
+                        <div className="flex gap-2">
+                           <button 
+                              onClick={() => setIsBatchMode(false)} 
+                              className={`flex-1 py-2 text-xs font-bold rounded border ${!isBatchMode ? 'bg-blue-50 border-blue-500 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                           >
+                              Single
+                           </button>
+                           <button 
+                              onClick={() => setIsBatchMode(true)} 
+                              className={`flex-1 py-2 text-xs font-bold rounded border ${isBatchMode ? 'bg-blue-50 border-blue-500 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                           >
+                              Batch (All)
+                           </button>
+                        </div>
+                    </div>
+
+                    {!isBatchMode && (
+                        <div className="animate-in fade-in slide-in-from-top-2">
+                            <label className="text-xs font-bold text-gray-500 uppercase block mb-1">Select Employee</label>
+                            <select className="w-full p-2 border rounded text-sm" value={selectedEmpId || ''} onChange={e => setSelectedEmpId(e.target.value)}>
+                                <option value="">Select Employee...</option>
+                                {ftStaff.map(e => <option key={e.id} value={e.id}>{e.personal.full_name}</option>)}
+                            </select>
+                        </div>
+                    )}
+                    
+                    {isBatchMode && (
+                        <div className="bg-amber-50 p-3 rounded-lg border border-amber-200 text-xs text-amber-800 animate-in fade-in slide-in-from-top-2">
+                            <div className="font-bold mb-1 flex items-center gap-1"><Users size={12}/> Bulk Print Ready</div>
+                            Will generate <span className="font-bold">{ftStaff.length}</span> individual sheets. Use your browser's print dialog to save as one PDF or print all.
+                        </div>
+                    )}
+
+                    <button onClick={handlePrint} className="w-full py-3 bg-slate-900 text-white font-bold rounded-lg hover:bg-slate-800 flex items-center justify-center gap-2 shadow-lg mt-auto">
+                        <Printer size={18}/> Print {isBatchMode ? 'All Sheets' : 'Sheet'}
                     </button>
                 </div>
             </div>
 
-            {/* The Physical Paper Sheet */}
-            {selectedEmp && refs ? (
-                <div className="bg-white shadow-lg print:shadow-none w-[8.5in] p-6 print:p-4 mx-auto text-black print:text-xs">
-                    
-                    {/* Header */}
-                    <div className="text-center border-b-2 border-black pb-2 mb-4">
-                        <h1 className="text-xl font-black uppercase tracking-wider">Leave Tracking Sheet</h1>
-                        {/* Fix: Use getLocalDate to ensure header date matches input exactly */}
-                        <p className="text-xs font-bold mt-1">Budget Period Beginning: {getLocalDate(budgetStartDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
+            {/* The Sheet Display Area */}
+            <div className="flex-1 bg-gray-100 overflow-auto p-8 flex flex-col items-center">
+                
+                {/* Single Mode */}
+                {!isBatchMode && selectedEmp && (
+                    <BudgetSheet emp={selectedEmp} />
+                )}
+
+                {/* Batch Mode */}
+                {isBatchMode && ftStaff.map(emp => (
+                    <BudgetSheet key={emp.id} emp={emp} />
+                ))}
+
+                {/* Empty State */}
+                {!isBatchMode && !selectedEmp && (
+                     <div className="flex items-center justify-center h-full text-gray-400 font-bold text-xl uppercase tracking-widest">
+                        Select an Employee
                     </div>
-
-                    {/* Info Block */}
-                    <div className="flex justify-between mb-4 text-xs border-b border-gray-300 pb-2">
-                        <div className="space-y-1">
-                            <p><span className="font-bold">Employee:</span> {selectedEmp.personal.full_name}</p>
-                            <p><span className="font-bold">Classification:</span> {selectedEmp.classifications.pay_level} / {refs.shift}</p>
-                        </div>
-                        <div className="space-y-1 text-right">
-                            <p><span className="font-bold">Start Date:</span> {selectedEmp.classifications.ft_start_date}</p>
-                            <p><span className="font-bold">ID:</span> {selectedEmp.employee_id || '---'}</p>
-                        </div>
-                    </div>
-
-                    {/* REFERENCE RATES (New Section) */}
-                    <div className="mb-6 grid grid-cols-2 gap-4 text-xs">
-                        <div className="border border-black p-2">
-                            <h4 className="font-bold uppercase border-b border-gray-300 mb-2 pb-1">Current Rate ({refs.current.label})</h4>
-                            <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-                                <div>Vacation:</div><div className="font-mono font-bold text-right">{refs.current.vacDays} days ({refs.current.vacHrs} hrs)</div>
-                                <div>Personal:</div><div className="font-mono font-bold text-right">{refs.current.persDays} days ({refs.current.persHrs} hrs)</div>
-                                
-                                {/* Total Row */}
-                                <div className="font-bold text-gray-700">Total:</div>
-                                <div className="font-mono font-bold text-right text-gray-700">
-                                    {refs.current.totalDays} days ({refs.current.totalHrs} hrs)
-                                </div>
-
-                                <div className="border-t border-gray-200 mt-1 pt-1 font-bold">Monthly:</div><div className="border-t border-gray-200 mt-1 pt-1 font-mono font-black text-right">{refs.current.monthly.toFixed(2)} hrs</div>
-                            </div>
-                        </div>
-                        
-                        {/* Next Year Column */}
-                        <div className="border border-black p-2 bg-gray-50">
-                            <h4 className="font-bold uppercase border-b border-gray-300 mb-2 pb-1 text-gray-600">Renewal / Next Year ({refs.next.label})</h4>
-                            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-gray-600">
-                                <div>Effective:</div><div className="font-mono font-bold text-right text-black">{refs.nextDate}</div>
-                                <div>Vacation:</div><div className="font-mono font-bold text-right text-black">{refs.next.vacDays} days ({refs.next.vacHrs} hrs)</div>
-                                <div>Personal:</div><div className="font-mono font-bold text-right text-black">{refs.next.persDays} days ({refs.next.persHrs} hrs)</div>
-                                
-                                {/* Total Row */}
-                                <div className="font-bold text-gray-500">Total:</div>
-                                <div className="font-mono font-bold text-right text-black">
-                                    {refs.next.totalDays} days ({refs.next.totalHrs} hrs)
-                                </div>
-
-                                <div className="border-t border-gray-300 mt-1 pt-1 font-bold">Monthly:</div><div className="border-t border-gray-300 mt-1 pt-1 font-mono font-bold text-right text-black">{refs.next.monthly.toFixed(2)} hrs</div>
-                            </div>
-                         </div>
-                    </div>
-
-                    {/* Table */}
-                    <table className="w-full border-collapse border border-black text-xs">
-                        <thead>
-                            <tr className="bg-gray-100 print:bg-gray-200">
-                                <th className="border border-black p-1 text-left w-1/4">Month</th>
-                                <th className="border border-black p-1 text-center w-24">Prev Bal</th>
-                                <th className="border border-black p-1 text-center w-20">Accrued (+)</th>
-                                <th className="border border-black p-1 text-center w-20">Used (-)</th>
-                                <th className="border border-black p-1 text-center w-24">New Bal</th>
-                                <th className="border border-black p-1 text-left w-20">Notes</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {/* Carry Over Row */}
-                            <tr>
-                                <td className="border border-black p-1 font-bold bg-gray-50">STARTING BALANCE</td>
-                                <td className="border border-black p-1 text-center font-bold text-gray-400 italic">---</td>
-                                <td className="border border-black p-1"></td>
-                                <td className="border border-black p-1"></td>
-                                <td className="border border-black p-1"></td>
-                                <td className="border border-black p-1"></td>
-                            </tr>
-                            
-                            {/* Monthly Rows */}
-                            {generateBudgetRows().map((row, idx) => (
-                                <tr key={idx} className={`h-8 ${row.isAnniversary ? 'bg-amber-50 print:bg-gray-100 font-bold border-b-2 border-black' : ''}`}>
-                                    <td className={`border border-black p-1 ${row.isAnniversary ? 'border-2' : ''}`}>
-                                        {row.month}
-                                        <div className="text-[9px] text-gray-500 font-normal">{row.tier}</div>
-                                        {row.isAnniversary && (
-                                            <div className="text-[8px] font-bold text-red-600 print:text-black mt-0.5">⚠️ ANNIVERSARY CAP (Max {row.capAmount} Hrs)</div>
-                                        )}
-                                    </td>
-                                    <td className="border border-black p-1"></td>
-                                    <td className="border border-black p-1 text-center font-bold text-gray-800">
-                                        {row.accrual.toFixed(2)}
-                                    </td>
-                                    <td className="border border-black p-1"></td>
-                                    <td className="border border-black p-1"></td>
-                                    <td className="border border-black p-1"></td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-
-                    <div className="mt-8 pt-4 border-t border-black flex justify-between text-[10px]">
-                        <div>
-                            <p className="font-bold">Chief / Supervisor: ___________________________________</p>
-                        </div>
-                    </div>
-                </div>
-            ) : (
-                <div className="flex items-center justify-center h-96 text-gray-400 font-bold text-xl uppercase tracking-widest">
-                    Select an Employee to Generate Sheet
-                </div>
-            )}
+                )}
+            </div>
             
             {/* Print Styles Injection */}
             <style>{`
@@ -670,6 +699,8 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
                     .print\\:shadow-none { box-shadow: none !important; }
                     .print\\:text-xs { font-size: 10px !important; }
                     .print\\:p-4 { padding: 1rem !important; }
+                    .print\\:mb-0 { margin-bottom: 0 !important; }
+                    .page-break-after { page-break-after: always; break-after: page; }
                     nav, header, aside { display: none !important; }
                     .overflow-auto { overflow: visible !important; }
                 }
