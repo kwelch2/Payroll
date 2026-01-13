@@ -19,7 +19,6 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
   const [showAdjustModal, setShowAdjustModal] = useState(false);
   
   // --- BUDGET REPORT STATE ---
-  // Default to Oct 1st of current year (or previous year if we are in Jan-Sept)
   const defaultBudgetStart = () => {
     const now = new Date();
     const year = now.getMonth() >= 9 ? now.getFullYear() : now.getFullYear() - 1;
@@ -203,7 +202,11 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
           const currentDate = new Date(startDate);
           currentDate.setMonth(startDate.getMonth() + i);
           
-          const stats = calculateMonthlyAccrual(selectedEmp, policy, currentDate);
+          // CRITICAL: We pass the END of the month to calculate accrual.
+          // This ensures if the anniversary falls on the 15th, they get the NEW rate for this month.
+          const effectiveDateForTier = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0); 
+          
+          const stats = calculateMonthlyAccrual(selectedEmp, policy, effectiveDateForTier);
           
           // Check for Anniversary Month
           const isAnniversary = currentDate.getMonth() === startMonth;
@@ -223,7 +226,7 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
   const getReferenceRates = () => {
       if (!selectedEmp) return null;
       
-      // Current Stats
+      // Current Stats (Using start date to be safe)
       const currentStats = calculateMonthlyAccrual(selectedEmp, policy, new Date(budgetStartDate));
       const hoursPerDay = getShiftHours(selectedEmp);
       
@@ -239,6 +242,9 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
          const start = new Date(selectedEmp.classifications.ft_start_date);
          const nextDate = new Date(start);
          nextDate.setFullYear(start.getFullYear() + nextTier.years);
+         
+         // Set to 1st of that month as requested
+         nextDate.setDate(1); 
          nextTierDateStr = nextDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
          
          const nextVacHrs = nextTier.vacation_days * hoursPerDay;
@@ -255,7 +261,7 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
          };
       }
 
-      // Convert Current Days back from hours (reverse calc) or just find tier
+      // Current Tier Breakdown
       const curTier = policy.tiers.find(t => `${t.years}+ Years` === currentStats.tier) || policy.tiers[0];
       const curVacDays = curTier?.vacation_days || 0;
       const curPersDays = curTier?.personal_days || 0;
@@ -595,10 +601,14 @@ export default function LeaveManager({ employees, setEmployees, onSave }: LeaveM
                                         {row.month}
                                         <div className="text-[9px] text-gray-500 font-normal">{row.tier}</div>
                                         {row.isAnniversary && (
-                                            <div className="text-[9px] font-bold text-red-600 print:text-black mt-0.5">⚠️ ANNIVERSARY - CHECK CAP (Max {row.capAmount} Hrs)</div>
+                                            <div className="text-[9px] font-bold text-red-600 print:text-black mt-0.5">⚠️ ANNIVERSARY MONTH</div>
                                         )}
                                     </td>
-                                    <td className="border border-black p-1"></td>
+                                    <td className="border border-black p-1 text-center">
+                                        {row.isAnniversary && (
+                                            <span className="text-[9px] block font-bold text-red-600 print:text-black mt-1">CHECK CAP HERE (Max {row.capAmount})</span>
+                                        )}
+                                    </td>
                                     <td className="border border-black p-1 text-center font-bold text-gray-800">
                                         {row.accrual.toFixed(2)}
                                     </td>
